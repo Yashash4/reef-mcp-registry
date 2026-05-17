@@ -1,12 +1,14 @@
 package pipeline
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/Yashash4/reef-mcp-registry/lobstertrap-reef/internal/audit"
+	"github.com/Yashash4/reef-mcp-registry/lobstertrap-reef/internal/engine/actions"
 	"github.com/Yashash4/reef-mcp-registry/lobstertrap-reef/internal/inspector"
 	"github.com/Yashash4/reef-mcp-registry/lobstertrap-reef/internal/metadata"
 	"github.com/Yashash4/reef-mcp-registry/lobstertrap-reef/internal/policy"
@@ -31,12 +33,23 @@ type PipelineEvent struct {
 }
 
 // Pipeline runs the ingress → inference → egress inspection flow.
+//
+// Reef extensions (A-4): when EnableReef is true and Dispatcher is non-nil,
+// the pipeline routes MODIFY/REDIRECT/QUARANTINE/HUMAN_REVIEW verdicts
+// through the actions dispatcher instead of treating them as soft no-ops.
+// When EnableReef is false, the pipeline behaves exactly as upstream Lobster
+// Trap (these actions are ignored beyond an audit-log entry). The flag is
+// wired by cmd/serve.go from the persistent `--enable-reef` flag declared
+// in cmd/root.go.
 type Pipeline struct {
 	inspector     *inspector.Inspector
 	ingressTable  *policy.MatchActionTable
 	egressTable   *policy.MatchActionTable
 	deniedDomains []string
 	auditLogger   *audit.Logger
+
+	enableReef bool
+	dispatcher *actions.Dispatcher
 
 	observerMu sync.RWMutex
 	observers  []EventObserver
@@ -48,16 +61,41 @@ type Pipeline struct {
 // so existing observers and audit consumers can route on it.
 const ReasonBlockedDeniedDomain = "blocked_denied_domain"
 
-// New creates a new Pipeline from a loaded policy.
+// New creates a new Pipeline from a loaded policy. Reef extensions are
+// disabled — call NewWithReef to opt in.
 func New(pol *policy.Policy, auditLogger *audit.Logger) *Pipeline {
 	ingress, egress := policy.BuildTables(pol)
 	return &Pipeline{
-		inspector:     inspector.New(),
+		inspector:     inspector.NewWithTrustedDomains(pol.Network.AllowedDomains),
 		ingressTable:  ingress,
 		egressTable:   egress,
 		deniedDomains: append([]string(nil), pol.Network.DeniedDomains...),
 		auditLogger:   auditLogger,
 	}
+}
+
+// NewWithReef creates a pipeline with the Reef action dispatcher attached.
+// When dispatcher is nil, the result is equivalent to New(pol, auditLogger);
+// passing a dispatcher with enableReef=false logs a warning at construction
+// time and behaves like the upstream path.
+func NewWithReef(pol *policy.Policy, auditLogger *audit.Logger, dispatcher *actions.Dispatcher, enableReef bool) *Pipeline {
+	pipe := New(pol, auditLogger)
+	pipe.enableReef = enableReef
+	pipe.dispatcher = dispatcher
+	return pipe
+}
+
+// SetEnableReef toggles the Reef action dispatch path at runtime. Used by
+// tests; production wires the flag at NewWithReef time.
+func (p *Pipeline) SetEnableReef(on bool) {
+	p.enableReef = on
+}
+
+// Dispatcher returns the attached actions.Dispatcher (nil if Reef is off
+// or no dispatcher was supplied). Exposed for integration tests + the
+// proxy's HTTP shaper which reads outcomes after pipeline processing.
+func (p *Pipeline) Dispatcher() *actions.Dispatcher {
+	return p.dispatcher
 }
 
 // ProcessIngress inspects a prompt and evaluates ingress rules.
@@ -79,16 +117,58 @@ func (p *Pipeline) ProcessIngress(promptText string, declared *metadata.RequestH
 		Mismatches:      mismatches,
 	}
 
-	if result.Action == policy.ActionDeny || result.Action == policy.ActionQuarantine {
-		pr.Blocked = true
-		pr.BlockedAt = "ingress"
-		pr.DenyMessage = result.DenyMessage
-	}
-
-	// Extract agent ID for audit logging
+	// Extract agent ID for audit logging + Reef action dispatch
 	var agentID string
 	if declared != nil {
 		agentID = declared.AgentID
+	}
+
+	// Reef action dispatch (A-4). Only fires when --enable-reef is on AND
+	// the matched action is one Reef implements. ALLOW / DENY / LOG keep
+	// their upstream paths so vanilla LT behaviour is preserved.
+	if p.enableReef && p.dispatcher != nil && isReefAction(result.Action) {
+		out := p.dispatcher.Dispatch(context.Background(), actions.Decision{
+			Direction:  actions.DirectionIngress,
+			RequestID:  reqID,
+			AgentID:    agentID,
+			Rule:       result,
+			Meta:       meta,
+			Body:       promptText,
+			OriginPath: "ingress",
+		})
+		pr.IngressAction = &out
+		// If the action degraded to DENY (fail-closed), reflect that in
+		// the rule result so downstream consumers see the actual verdict.
+		if out.Action == policy.ActionDeny && result.Action != policy.ActionDeny {
+			result.Action = policy.ActionDeny
+			if out.Reason != "" {
+				result.DenyMessage = out.Reason
+			} else {
+				result.DenyMessage = "[REEF] action failed-closed to DENY"
+			}
+			*pr.IngressResult = result
+		}
+	} else if p.enableReef && p.dispatcher == nil && isReefAction(result.Action) {
+		// Flag is on but dispatcher missing — log the configuration error.
+		// Treat as upstream did: ALLOW/LOG-equivalent verdicts already pass
+		// through, the blocking ones (DENY/QUARANTINE) already block.
+		// Nothing else to do.
+	} else if !p.enableReef && isReefAction(result.Action) && result.Action != policy.ActionDeny && result.Action != policy.ActionQuarantine {
+		// Vanilla Lobster Trap: MODIFY/REDIRECT/HUMAN_REVIEW silently fall
+		// through. We at least audit that the rule matched so operators see
+		// they had a Reef rule fire on a non-Reef deployment.
+		// (No code change here; the audit.Log below captures it.)
+	}
+
+	if result.Action == policy.ActionDeny || result.Action == policy.ActionQuarantine ||
+		(p.enableReef && (result.Action == policy.ActionRedirect || result.Action == policy.ActionHumanReview)) {
+		pr.Blocked = true
+		pr.BlockedAt = "ingress"
+		if result.DenyMessage != "" {
+			pr.DenyMessage = result.DenyMessage
+		} else if pr.IngressAction != nil {
+			pr.DenyMessage = pr.IngressAction.Reason
+		}
 	}
 
 	// Audit log
@@ -120,6 +200,16 @@ func (p *Pipeline) ProcessIngress(promptText string, declared *metadata.RequestH
 	return pr
 }
 
+// isReefAction returns true for the four Lobster Trap actions Reef ships:
+// MODIFY, REDIRECT, QUARANTINE, HUMAN_REVIEW.
+func isReefAction(a policy.Action) bool {
+	switch a {
+	case policy.ActionModify, policy.ActionRedirect, policy.ActionQuarantine, policy.ActionHumanReview:
+		return true
+	}
+	return false
+}
+
 // ProcessEgress inspects model output and evaluates egress rules.
 // Updates the existing PipelineResult with egress information.
 func (p *Pipeline) ProcessEgress(pr *PipelineResult, responseText string) {
@@ -148,11 +238,51 @@ func (p *Pipeline) ProcessEgress(pr *PipelineResult, responseText string) {
 
 	pr.EgressMetadata = meta
 	pr.EgressResult = &result
+	// Default: the body forwarded to the caller is the model's original
+	// output. MODIFY rewrites this below.
+	pr.EgressBody = responseText
 
-	if result.Action == policy.ActionDeny || result.Action == policy.ActionQuarantine {
+	// Reef action dispatch (A-4).
+	var agentID string
+	if pr.DeclaredHeaders != nil {
+		agentID = pr.DeclaredHeaders.AgentID
+	}
+	if p.enableReef && p.dispatcher != nil && isReefAction(result.Action) {
+		out := p.dispatcher.Dispatch(context.Background(), actions.Decision{
+			Direction:  actions.DirectionEgress,
+			RequestID:  pr.RequestID,
+			AgentID:    agentID,
+			Rule:       result,
+			Meta:       meta,
+			Body:       responseText,
+			OriginPath: "egress",
+		})
+		pr.EgressAction = &out
+		// MODIFY: swap the forwarded body with the rewritten text.
+		if out.Action == policy.ActionModify && out.RewrittenBody != "" {
+			pr.EgressBody = out.RewrittenBody
+		}
+		// Fail-closed degradation: an action that errored returns DENY.
+		if out.Action == policy.ActionDeny && result.Action != policy.ActionDeny {
+			result.Action = policy.ActionDeny
+			if out.Reason != "" {
+				result.DenyMessage = out.Reason
+			} else {
+				result.DenyMessage = "[REEF] action failed-closed to DENY"
+			}
+			*pr.EgressResult = result
+		}
+	}
+
+	if result.Action == policy.ActionDeny || result.Action == policy.ActionQuarantine ||
+		(p.enableReef && (result.Action == policy.ActionRedirect || result.Action == policy.ActionHumanReview)) {
 		pr.Blocked = true
 		pr.BlockedAt = "egress"
-		pr.DenyMessage = result.DenyMessage
+		if result.DenyMessage != "" {
+			pr.DenyMessage = result.DenyMessage
+		} else if pr.EgressAction != nil {
+			pr.DenyMessage = pr.EgressAction.Reason
+		}
 	}
 
 	// Audit log

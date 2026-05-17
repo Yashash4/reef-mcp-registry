@@ -29,10 +29,12 @@ func (t *MatchActionTable) Evaluate(meta *inspector.PromptMetadata) RuleResult {
 	for _, rule := range t.Rules {
 		if matchRule(rule, meta) {
 			return RuleResult{
-				Matched:     true,
-				RuleName:    rule.Name,
-				Action:      rule.Action,
-				DenyMessage: rule.DenyMessage,
+				Matched:            true,
+				RuleName:           rule.Name,
+				Action:             rule.Action,
+				DenyMessage:        rule.DenyMessage,
+				ModifyStrategy:     rule.ModifyStrategy,
+				RedirectTargetBand: rule.RedirectTargetBand,
 			}
 		}
 	}
@@ -133,6 +135,23 @@ func getFieldValue(field string, meta *inspector.PromptMetadata) any {
 		return meta.TargetCommands
 	case "token_count":
 		return meta.TokenCount
+	// Reef-only signals (A-4). The first two are computed by the inspector's
+	// markdown-exfil heuristic. The remaining three are populated by A-6
+	// (SVID identity + EWMA) — they sit at zero-value until A-6 lands but
+	// the match table already supports them so policy YAML can be written
+	// once.
+	case "contains_markdown_image_with_external_url":
+		return meta.ContainsMarkdownImageWithExternalURL
+	case "markdown_image_urls":
+		return meta.MarkdownImageURLs
+	case "bare_urls":
+		return meta.BareURLs
+	case "agent_identity_verified":
+		return meta.AgentIdentityVerified
+	case "intent_mismatch_score":
+		return meta.IntentMismatchScore
+	case "asi_category_ewma":
+		return meta.AsiCategoryEwma
 	default:
 		return nil
 	}

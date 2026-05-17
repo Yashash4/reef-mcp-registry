@@ -12,10 +12,44 @@ import (
 
 	"github.com/Yashash4/reef-mcp-registry/lobstertrap-reef/internal/audit"
 	"github.com/Yashash4/reef-mcp-registry/lobstertrap-reef/internal/dashboard"
+	"github.com/Yashash4/reef-mcp-registry/lobstertrap-reef/internal/engine/actions"
 	"github.com/Yashash4/reef-mcp-registry/lobstertrap-reef/internal/pipeline"
 	"github.com/Yashash4/reef-mcp-registry/lobstertrap-reef/internal/policy"
 	"github.com/Yashash4/reef-mcp-registry/lobstertrap-reef/internal/proxy"
+	"github.com/Yashash4/reef-mcp-registry/lobstertrap-reef/internal/quarantine"
 )
+
+// reefLoggerAdapter bridges actions.Logger over zerolog so action handlers
+// emit structured events into the same log stream as the rest of the proxy.
+type reefLoggerAdapter struct{ logger zerolog.Logger }
+
+func (a *reefLoggerAdapter) Warn(msg string, kv ...any) {
+	a.logger.Warn().Interface("kv", kvSlice(kv)).Msg(msg)
+}
+
+func (a *reefLoggerAdapter) Info(msg string, kv ...any) {
+	a.logger.Info().Interface("kv", kvSlice(kv)).Msg(msg)
+}
+
+func (a *reefLoggerAdapter) Error(msg string, err error, kv ...any) {
+	a.logger.Error().Err(err).Interface("kv", kvSlice(kv)).Msg(msg)
+}
+
+// kvSlice reshapes the variadic kv pairs into a slice of (key,value)
+// strings; zerolog handles the structured emit. Defensive against odd-length
+// inputs — a stray key without a value is rendered as `<no-value>`.
+func kvSlice(kv []any) []string {
+	out := make([]string, 0, len(kv))
+	for i := 0; i < len(kv); i += 2 {
+		k := fmt.Sprintf("%v", kv[i])
+		v := "<no-value>"
+		if i+1 < len(kv) {
+			v = fmt.Sprintf("%v", kv[i+1])
+		}
+		out = append(out, k+"="+v)
+	}
+	return out
+}
 
 var (
 	policyFile  string
@@ -68,8 +102,45 @@ func runServe(cmd *cobra.Command, args []string) error {
 		auditLogger = audit.NewStderrLogger()
 	}
 
-	// Create pipeline
-	pipe := pipeline.New(pol, auditLogger)
+	// Create pipeline. When --enable-reef is on, build the action dispatcher
+	// + quarantine store and wire them. When off, fall back to the upstream
+	// pipeline.New path so vanilla Lobster Trap behaviour is preserved.
+	var pipe *pipeline.Pipeline
+	if EnableReef {
+		quarantineDir := os.Getenv("REEF_QUARANTINE_DIR")
+		store, qerr := quarantine.NewStore(quarantineDir)
+		if qerr != nil {
+			return fmt.Errorf("creating quarantine store: %w", qerr)
+		}
+		redirectFallback := os.Getenv("REEF_REDIRECT_TARGET")
+		if redirectFallback == "" {
+			redirectFallback = "http://localhost:8765/gemma-stub"
+		}
+		// If the policy YAML didn't set the webhook, pick it up from the env.
+		if pol.Notifications.HumanReviewWebhook == "" {
+			if v := os.Getenv("REEF_HUMAN_REVIEW_WEBHOOK"); v != "" {
+				pol.Notifications.HumanReviewWebhook = v
+			}
+		}
+		dispatcher, derr := actions.NewDispatcher(actions.DispatcherConfig{
+			Policy:           pol,
+			Store:            store,
+			Logger:           &reefLoggerAdapter{logger: logger.With().Str("subsystem", "reef-actions").Logger()},
+			RedirectFallback: redirectFallback,
+		})
+		if derr != nil {
+			return fmt.Errorf("creating reef action dispatcher: %w", derr)
+		}
+		pipe = pipeline.NewWithReef(pol, auditLogger, dispatcher, true)
+		logger.Info().
+			Str("quarantine_dir", store.Dir()).
+			Str("redirect_fallback", redirectFallback).
+			Str("human_review_webhook", pol.Notifications.HumanReviewWebhook).
+			Msg("reef extensions enabled")
+	} else {
+		pipe = pipeline.New(pol, auditLogger)
+		logger.Info().Msg("reef extensions disabled (vanilla Lobster Trap)")
+	}
 
 	// Create proxy
 	guardProxy, err := proxy.New(pipe, backendURL, logger)

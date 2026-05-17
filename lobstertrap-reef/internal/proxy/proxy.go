@@ -87,6 +87,61 @@ func (gp *GuardProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Str("intent", result.IngressMetadata.IntentCategory).
 		Msg("ingress")
 
+	// Reef ingress action shaping (A-4). REDIRECT emits 307; QUARANTINE
+	// emits 451 + Quarantine-ID; HUMAN_REVIEW emits 202 + Review-ID +
+	// Retry-After. Runs BEFORE the upstream deny path so the proxy uses
+	// the action-specific status code rather than the upstream 200/JSON
+	// envelope for these verdicts.
+	if act := result.IngressAction; act != nil {
+		switch act.Action {
+		case policy.ActionRedirect:
+			gp.logger.Info().
+				Str("request_id", result.RequestID).
+				Str("redirect_target", act.RedirectTarget).
+				Msg("redirected at ingress")
+			w.Header().Set("Location", act.RedirectTarget)
+			w.Header().Set("X-Reef-Redirect-Band", act.RedirectBand)
+			status := act.StatusCode
+			if status == 0 {
+				status = http.StatusTemporaryRedirect
+			}
+			w.WriteHeader(status)
+			return
+		case policy.ActionQuarantine:
+			gp.logger.Warn().
+				Str("request_id", result.RequestID).
+				Str("quarantine_id", act.QuarantineID).
+				Msg("quarantined at ingress")
+			w.Header().Set("Quarantine-ID", act.QuarantineID)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnavailableForLegalReasons)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"verdict":       "QUARANTINE",
+				"quarantine_id": act.QuarantineID,
+				"reason":        act.Reason,
+			})
+			return
+		case policy.ActionHumanReview:
+			gp.logger.Warn().
+				Str("request_id", result.RequestID).
+				Str("review_id", act.ReviewID).
+				Msg("ingress queued for human review")
+			w.Header().Set("Review-ID", act.ReviewID)
+			if act.ReviewRetryAfterSec > 0 {
+				w.Header().Set("Retry-After", strconv.Itoa(act.ReviewRetryAfterSec))
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusAccepted)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"verdict":         "HUMAN_REVIEW",
+				"review_id":       act.ReviewID,
+				"retry_after_sec": act.ReviewRetryAfterSec,
+				"reason":          act.Reason,
+			})
+			return
+		}
+	}
+
 	// If blocked at ingress, return deny response with metadata
 	if !result.ShouldForward() {
 		gp.logger.Warn().
@@ -103,7 +158,9 @@ func (gp *GuardProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// If HUMAN_REVIEW, block with review message and metadata
+	// If HUMAN_REVIEW (legacy upstream path — only reachable when Reef is OFF
+	// and the upstream pipeline classifies a HUMAN_REVIEW verdict), block
+	// with review message and metadata.
 	if result.NeedsHumanReview() {
 		gp.logger.Warn().
 			Str("request_id", result.RequestID).
@@ -143,7 +200,61 @@ func (gp *GuardProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		responseText := ExtractResponseText(chatResp)
 		gp.pipe.ProcessEgress(result, responseText)
 
-		if result.Blocked && result.BlockedAt == "egress" {
+		// Reef egress action shaping (A-4). MODIFY rewrites the response
+		// body in-place so the forwarded chat-completion choice carries
+		// the redacted text. REDIRECT / QUARANTINE / HUMAN_REVIEW emit
+		// status-coded responses, mirroring the ingress shaping above —
+		// they fire on egress when policy rules match the model output.
+		if act := result.EgressAction; act != nil {
+			switch act.Action {
+			case policy.ActionModify:
+				if act.RewrittenBody != "" && len(chatResp.Choices) > 0 {
+					chatResp.Choices[0].Message.Content = act.RewrittenBody
+					if newBody, mErr := json.Marshal(chatResp); mErr == nil {
+						respBody = newBody
+					}
+				}
+				gp.logger.Info().
+					Str("request_id", result.RequestID).
+					Int("edits", act.Edits).
+					Msg("egress modified")
+			case policy.ActionRedirect:
+				w.Header().Set("Location", act.RedirectTarget)
+				w.Header().Set("X-Reef-Redirect-Band", act.RedirectBand)
+				status := act.StatusCode
+				if status == 0 {
+					status = http.StatusTemporaryRedirect
+				}
+				w.WriteHeader(status)
+				return
+			case policy.ActionQuarantine:
+				w.Header().Set("Quarantine-ID", act.QuarantineID)
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusUnavailableForLegalReasons)
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"verdict":       "QUARANTINE",
+					"quarantine_id": act.QuarantineID,
+					"reason":        act.Reason,
+				})
+				return
+			case policy.ActionHumanReview:
+				w.Header().Set("Review-ID", act.ReviewID)
+				if act.ReviewRetryAfterSec > 0 {
+					w.Header().Set("Retry-After", strconv.Itoa(act.ReviewRetryAfterSec))
+				}
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusAccepted)
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"verdict":         "HUMAN_REVIEW",
+					"review_id":       act.ReviewID,
+					"retry_after_sec": act.ReviewRetryAfterSec,
+					"reason":          act.Reason,
+				})
+				return
+			}
+		}
+
+		if result.Blocked && result.BlockedAt == "egress" && result.EgressResult.Action == policy.ActionDeny {
 			gp.logger.Warn().
 				Str("request_id", result.RequestID).
 				Str("rule", result.EgressResult.RuleName).

@@ -44,6 +44,19 @@ type GuardRule struct {
 	Action      Action           `yaml:"action" json:"action"`
 	DenyMessage string           `yaml:"deny_message,omitempty" json:"deny_message,omitempty"`
 	Conditions  []MatchCondition `yaml:"conditions" json:"conditions"`
+
+	// ModifyStrategy names the inline-rewrite recipe the MODIFY action runs
+	// when this rule matches. Recognised values (A-4):
+	//   - "strip_markdown_images_to_untrusted_domains"
+	//   - "redact_bare_urls_with_secret_fragments"
+	// Other values are logged and treated as a no-op (the action degrades to
+	// LOG with a structured warning so audits never silently swallow them).
+	ModifyStrategy string `yaml:"modify_strategy,omitempty" json:"modify_strategy,omitempty"`
+
+	// RedirectTargetBand selects an entry from policy.Network.RedirectTargets
+	// for the REDIRECT action. Conventional bands are "low" / "medium" / "high"
+	// but the value is opaque — any key present in the map is accepted.
+	RedirectTargetBand string `yaml:"redirect_target_band,omitempty" json:"redirect_target_band,omitempty"`
 }
 
 // RateLimits configures rate limiting thresholds.
@@ -53,11 +66,35 @@ type RateLimits struct {
 	BurstThreshold    int `yaml:"burst_threshold" json:"burst_threshold"`
 }
 
-// NetworkPolicy configures allowed/denied domains.
+// NetworkPolicy configures allowed/denied domains and (Reef-only) the
+// per-risk-band redirect targets used by the REDIRECT action.
 type NetworkPolicy struct {
 	EgressPolicy   string   `yaml:"egress_policy" json:"egress_policy"`
 	AllowedDomains []string `yaml:"allowed_domains" json:"allowed_domains"`
 	DeniedDomains  []string `yaml:"denied_domains" json:"denied_domains"`
+
+	// RedirectTargets maps a risk-band label (e.g. "low", "medium", "high")
+	// to an upstream URL that the REDIRECT action will route to. Populated by
+	// policy YAML; when --enable-reef is off this field is parsed but ignored
+	// by the engine. Added by A-4 to back the REDIRECT action contract.
+	RedirectTargets map[string]string `yaml:"redirect_targets,omitempty" json:"redirect_targets,omitempty"`
+}
+
+// Notifications configures the outbound webhook surface used by Reef
+// actions that hand off to a human review or alerting queue. Populated by
+// policy YAML; --enable-reef must be on for the dispatcher to use these.
+type Notifications struct {
+	// HumanReviewWebhook is the URL the HUMAN_REVIEW action POSTs to with
+	// the request payload and a callback URL the approval UI can hit to
+	// release or deny. Phase 2 hardens this with mTLS + signing; v1 ships
+	// the JSON envelope only.
+	HumanReviewWebhook string `yaml:"human_review_webhook,omitempty" json:"human_review_webhook,omitempty"`
+	// HumanReviewTimeoutMs is the dial+request timeout for the webhook.
+	// Zero falls back to a 1500ms default (DialContext + ResponseHeaderTimeout).
+	HumanReviewTimeoutMs int `yaml:"human_review_timeout_ms,omitempty" json:"human_review_timeout_ms,omitempty"`
+	// HumanReviewRetryAfterSeconds is echoed back to the caller in the
+	// Retry-After header so the agent (or its scheduler) knows when to poll.
+	HumanReviewRetryAfterSeconds int `yaml:"human_review_retry_after_seconds,omitempty" json:"human_review_retry_after_seconds,omitempty"`
 }
 
 // FilesystemPolicy configures allowed/denied file paths.
@@ -77,6 +114,7 @@ type Policy struct {
 	RateLimits    RateLimits       `yaml:"rate_limits" json:"rate_limits"`
 	Network       NetworkPolicy    `yaml:"network" json:"network"`
 	Filesystem    FilesystemPolicy `yaml:"filesystem" json:"filesystem"`
+	Notifications Notifications    `yaml:"notifications,omitempty" json:"notifications,omitempty"`
 }
 
 // MatchActionTable holds a sorted list of rules and a default action.
@@ -91,4 +129,11 @@ type RuleResult struct {
 	RuleName    string `json:"rule_name,omitempty"`
 	Action      Action `json:"action"`
 	DenyMessage string `json:"deny_message,omitempty"`
+
+	// ModifyStrategy is propagated from the matched rule so the Reef action
+	// dispatcher knows which rewrite recipe to apply.
+	ModifyStrategy string `json:"modify_strategy,omitempty"`
+	// RedirectTargetBand is propagated from the matched rule so the Reef
+	// REDIRECT action can resolve to the correct upstream URL.
+	RedirectTargetBand string `json:"redirect_target_band,omitempty"`
 }

