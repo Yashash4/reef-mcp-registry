@@ -12,6 +12,7 @@ import (
 	"github.com/Yashash4/reef-mcp-registry/lobstertrap-reef/internal/inspector"
 	"github.com/Yashash4/reef-mcp-registry/lobstertrap-reef/internal/metadata"
 	"github.com/Yashash4/reef-mcp-registry/lobstertrap-reef/internal/policy"
+	"github.com/Yashash4/reef-mcp-registry/lobstertrap-reef/pkg/mcpsupply"
 )
 
 var requestCounter atomic.Uint64
@@ -51,6 +52,14 @@ type Pipeline struct {
 	enableReef bool
 	dispatcher *actions.Dispatcher
 
+	// Reef MCP signature registry sidecar verifier (A-5). When non-nil and
+	// --enable-reef is on, the pipeline calls Verify before the ingress
+	// rule table runs whenever inspector.PromptMetadata.MCPBindTarget != "".
+	// A deny decision short-circuits the rest of the pipeline with a
+	// BIND_DENIED outcome carrying the violation code Atlas returned (e.g.
+	// MCP-RCE-26.04). A review decision dispatches HUMAN_REVIEW.
+	mcpVerifier mcpsupply.Verifier
+
 	observerMu sync.RWMutex
 	observers  []EventObserver
 }
@@ -60,6 +69,14 @@ type Pipeline struct {
 // network.denied_domains list. Surfaced via PipelineResult.EgressResult.RuleName
 // so existing observers and audit consumers can route on it.
 const ReasonBlockedDeniedDomain = "blocked_denied_domain"
+
+// ReasonMCPBindDenied / ReasonMCPBindReview are the synthetic rule names
+// emitted when the Reef Atlas signature registry denies / flags a server bind
+// attempt. RuleName is what observers and audit logs route on.
+const (
+	ReasonMCPBindDenied = "mcp_bind_denied_by_registry"
+	ReasonMCPBindReview = "mcp_bind_review_by_registry"
+)
 
 // New creates a new Pipeline from a loaded policy. Reef extensions are
 // disabled — call NewWithReef to opt in.
@@ -85,6 +102,21 @@ func NewWithReef(pol *policy.Policy, auditLogger *audit.Logger, dispatcher *acti
 	return pipe
 }
 
+// WithMCPVerifier attaches the Reef MCP signature registry verifier (A-5)
+// to an existing pipeline. The verifier is consulted before the ingress
+// rule table whenever PromptMetadata.MCPBindTarget != "". Returns the same
+// pipeline for chaining.
+func (p *Pipeline) WithMCPVerifier(v mcpsupply.Verifier) *Pipeline {
+	p.mcpVerifier = v
+	return p
+}
+
+// MCPVerifier returns the attached MCP verifier (nil if A-5 was not wired).
+// Exposed for tests + introspection.
+func (p *Pipeline) MCPVerifier() mcpsupply.Verifier {
+	return p.mcpVerifier
+}
+
 // SetEnableReef toggles the Reef action dispatch path at runtime. Used by
 // tests; production wires the flag at NewWithReef time.
 func (p *Pipeline) SetEnableReef(on bool) {
@@ -104,6 +136,55 @@ func (p *Pipeline) ProcessIngress(promptText string, declared *metadata.RequestH
 	reqID := fmt.Sprintf("req-%d", requestCounter.Add(1))
 
 	meta := p.inspector.Inspect(promptText)
+
+	// Reef A-5 pre-ingress hook: if the inspector detected an MCP server bind
+	// attempt AND a verifier is attached AND Reef is enabled, call Atlas
+	// BEFORE the rule table runs. Decision results land on the metadata so
+	// YAML rules can match `mcp_bind_target_decision`. A deny here is the
+	// centerpiece block — we override the table result to DENY with the
+	// violation code Atlas returned. A review dispatches HUMAN_REVIEW. An
+	// allow lets the rule table run normally.
+	var mcpResp *mcpsupply.VerifyResponse
+	if p.enableReef && p.mcpVerifier != nil && meta.MCPBindTarget != "" {
+		var agentIDForVerify string
+		if declared != nil {
+			agentIDForVerify = declared.AgentID
+		}
+		transport := meta.MCPBindTransport
+		if transport == "" {
+			transport = "http"
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		mcpResp, _ = p.mcpVerifier.Verify(ctx, mcpsupply.VerifyRequest{
+			MCPName:   meta.MCPBindTarget,
+			Version:   meta.MCPBindVersion,
+			Transport: transport,
+			AgentID:   agentIDForVerify,
+			RequestID: reqID,
+		})
+		cancel()
+		// Programmer errors return nil response — fail closed.
+		if mcpResp == nil {
+			mcpResp = &mcpsupply.VerifyResponse{
+				Decision: mcpsupply.DecisionDeny,
+				Reason:   "Reef MCP verifier returned nil — fail-closed deny",
+				Violations: []mcpsupply.Violation{{
+					Code:   "REGISTRY_CLIENT_ERROR",
+					Detail: "verifier returned nil response",
+				}},
+				AuditID: "audit-local-nilresp",
+			}
+		}
+		meta.MCPBindDecision = mcpResp.Decision
+		meta.MCPBindRegistryID = mcpResp.RegistryID
+		for _, v := range mcpResp.Violations {
+			meta.MCPBindViolations = append(meta.MCPBindViolations, inspector.MCPBindViolation{
+				Code:   v.Code,
+				Detail: v.Detail,
+			})
+		}
+	}
+
 	result := p.ingressTable.Evaluate(meta)
 
 	// Detect mismatches between declared and detected metadata
@@ -121,6 +202,44 @@ func (p *Pipeline) ProcessIngress(promptText string, declared *metadata.RequestH
 	var agentID string
 	if declared != nil {
 		agentID = declared.AgentID
+	}
+
+	// Reef A-5: when the MCP verifier returned deny/review, override the
+	// rule-table result so the action dispatcher + outcome shaping below
+	// surface the BIND_DENIED verdict with the correct violation code.
+	// Allow passes through to the rule table (and may still be denied by
+	// some other rule like a content scanner).
+	if mcpResp != nil {
+		switch mcpResp.Decision {
+		case mcpsupply.DecisionDeny:
+			denyMsg := mcpResp.Reason
+			if denyMsg == "" {
+				denyMsg = "[REEF] MCP bind denied by signature registry"
+			}
+			if len(mcpResp.Violations) > 0 {
+				denyMsg = "[REEF] BIND_DENIED — " + mcpResp.Violations[0].Code +
+					": " + mcpResp.Violations[0].Detail
+			}
+			result = policy.RuleResult{
+				Matched:     true,
+				RuleName:    ReasonMCPBindDenied,
+				Action:      policy.ActionDeny,
+				DenyMessage: denyMsg,
+			}
+			*pr.IngressResult = result
+		case mcpsupply.DecisionReview:
+			reviewMsg := mcpResp.Reason
+			if reviewMsg == "" {
+				reviewMsg = "[REEF] MCP bind held for human review by signature registry"
+			}
+			result = policy.RuleResult{
+				Matched:     true,
+				RuleName:    ReasonMCPBindReview,
+				Action:      policy.ActionHumanReview,
+				DenyMessage: reviewMsg,
+			}
+			*pr.IngressResult = result
+		}
 	}
 
 	// Reef action dispatch (A-4). Only fires when --enable-reef is on AND

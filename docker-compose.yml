@@ -1,20 +1,44 @@
 # Reef — top-level docker compose
 #
-# This is the stub that will be fleshed out as the three layers ship:
-#   - reef-registry  (MCP signature registry, Python FastAPI + ed25519)
-#   - lobstertrap-reef (Go fork of Lobster Trap with Reef extensions)
-#   - victim          (Next.js Copilot-clone — the EchoLeak target)
-#   - stage-ui        (Next.js stage / Public Safety Page)
-#   - quote           (Reef Quote / Underwriter — Gemini 3 Pro)
-#   - dast-a          (PPO adversary)
+# Bring-up order: atlas (MCP signature registry) -> lobstertrap-reef -> victim
+# -> stage-ui -> quote -> dast-a
 #
-# Bring-up order will be: registry -> lobstertrap-reef -> victim -> stage-ui -> quote -> dast-a
-#
-# Each service's Dockerfile lives next to its source tree under reef/, lobstertrap-reef/, victim/, etc.
+# A-5 ships the atlas service end-to-end. Other services come online as their
+# owning agents land their implementations.
 
 version: "3.9"
 
-services: {}
+services:
+  atlas:
+    build:
+      context: ./reef/control-plane/atlas
+      dockerfile: Dockerfile
+    image: reef/atlas:dev
+    container_name: reef-atlas
+    environment:
+      - REEF_ATLAS_DATA_DIR=/data
+      - REEF_ATLAS_PUBLISHER_KEYS_DIR=/keys/publishers
+      - REEF_ATLAS_AUDIT_FILE=/data/audit.jsonl
+      - REEF_ATLAS_SEED_ON_BOOT=1
+      - REEF_ATLAS_HOST=0.0.0.0
+      - REEF_ATLAS_PORT=8080
+    ports:
+      - "8080:8080"
+    volumes:
+      - atlas-data:/data
+      - atlas-keys:/keys
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8080/healthz').status==200 else 1)\""]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+    networks:
+      - reef
+
+volumes:
+  atlas-data:
+  atlas-keys:
 
 networks:
   reef:

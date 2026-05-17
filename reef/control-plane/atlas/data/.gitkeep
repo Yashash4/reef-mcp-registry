@@ -1,0 +1,2 @@
+# Atlas runtime data dir — JSON-backed registry + audit log live here.
+# Populated by the lifespan seed; gitignored aside from this placeholder.

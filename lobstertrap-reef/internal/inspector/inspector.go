@@ -43,6 +43,38 @@ type PromptMetadata struct {
 	AgentIdentityVerified bool    `json:"agent_identity_verified,omitempty"`
 	IntentMismatchScore   float64 `json:"intent_mismatch_score,omitempty"`
 	AsiCategoryEwma       float64 `json:"asi_category_ewma,omitempty"`
+
+	// Reef MCP supply-chain field (A-5). When the prompt mentions an MCP
+	// server bind attempt (regex-heuristic — `mcp://`, `bind_mcp(name,...)`,
+	// or a literal MCP manifest reference), MCPBindTarget carries the
+	// (mcpName, version) tuple the pipeline forwards to the Reef Atlas
+	// signature registry. Empty string => no bind detected; pipeline skips
+	// the registry call. MCPBindVersion may be empty when the prompt didn't
+	// specify a version; Atlas treats missing as the canonical pinned key
+	// miss (BIND_DENIED).
+	MCPBindTarget    string `json:"mcp_bind_target,omitempty"`
+	MCPBindVersion   string `json:"mcp_bind_version,omitempty"`
+	MCPBindTransport string `json:"mcp_bind_transport,omitempty"`
+
+	// MCPBindDecision is populated by the pre-ingress verifier hook in the
+	// pipeline after it calls the Reef Atlas registry. Values: "allow",
+	// "deny", "review", or "" when the inspector didn't detect a bind
+	// attempt. Exposed so YAML rules can match `mcp_bind_target_decision`.
+	MCPBindDecision  string `json:"mcp_bind_target_decision,omitempty"`
+	// MCPBindRegistryID is the registry_id Atlas returned (empty on deny).
+	MCPBindRegistryID string `json:"mcp_bind_registry_id,omitempty"`
+	// MCPBindViolations is the violation code/detail list from Atlas. The
+	// first entry's Code is mirrored into the rule's DenyMessage so audit
+	// logs and the proxy response carry the citation (MCP-RCE-26.04, etc.).
+	MCPBindViolations []MCPBindViolation `json:"mcp_bind_violations,omitempty"`
+}
+
+// MCPBindViolation mirrors mcpsupply.Violation without a cross-package
+// dependency. The pipeline copies values into this struct after each Atlas
+// /verify call.
+type MCPBindViolation struct {
+	Code   string `json:"code"`
+	Detail string `json:"detail"`
 }
 
 // Inspector is the DPI engine. It extracts structured metadata from text
@@ -145,6 +177,18 @@ func (ins *Inspector) Inspect(text string) *PromptMetadata {
 				meta.BareURLs = append(meta.BareURLs, c.URL)
 			}
 		}
+	}
+
+	// Reef A-5: detect MCP server bind attempts so the pipeline can call
+	// the Atlas signature registry BEFORE the rule table evaluates. The
+	// extractor recognises bind_mcp() tool calls, mcp:// URIs, and the
+	// natural-language patterns the cold-open demo uses. Empty mcpName
+	// means "no bind attempt detected" — the pipeline skips the verifier
+	// in that case (no perf cost on benign prompts).
+	if name, ver, tr, ok := DetectMCPBind(text); ok {
+		meta.MCPBindTarget = name
+		meta.MCPBindVersion = ver
+		meta.MCPBindTransport = tr
 	}
 
 	// Classify intent

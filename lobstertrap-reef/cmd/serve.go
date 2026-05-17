@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
@@ -17,6 +19,7 @@ import (
 	"github.com/Yashash4/reef-mcp-registry/lobstertrap-reef/internal/policy"
 	"github.com/Yashash4/reef-mcp-registry/lobstertrap-reef/internal/proxy"
 	"github.com/Yashash4/reef-mcp-registry/lobstertrap-reef/internal/quarantine"
+	"github.com/Yashash4/reef-mcp-registry/lobstertrap-reef/pkg/mcpsupply"
 )
 
 // reefLoggerAdapter bridges actions.Logger over zerolog so action handlers
@@ -132,10 +135,30 @@ func runServe(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("creating reef action dispatcher: %w", derr)
 		}
 		pipe = pipeline.NewWithReef(pol, auditLogger, dispatcher, true)
+
+		// Reef A-5: attach the MCP signature registry verifier so the
+		// pre-ingress hook blocks unsigned / poisoned MCP server binds.
+		// REEF_MCP_REGISTRY_URL defaults to the Atlas service's docker-compose
+		// hostname; tests + local runs can point it at http://localhost:8080.
+		registryURL := os.Getenv("REEF_MCP_REGISTRY_URL")
+		if registryURL == "" {
+			registryURL = "http://localhost:8080"
+		}
+		registryTimeout := 1500 * time.Millisecond
+		if v := os.Getenv("REEF_MCP_REGISTRY_TIMEOUT_MS"); v != "" {
+			if ms, perr := strconv.Atoi(v); perr == nil && ms > 0 {
+				registryTimeout = time.Duration(ms) * time.Millisecond
+			}
+		}
+		verifier := mcpsupply.NewHTTPVerifier(registryURL, registryTimeout)
+		pipe = pipe.WithMCPVerifier(verifier)
+
 		logger.Info().
 			Str("quarantine_dir", store.Dir()).
 			Str("redirect_fallback", redirectFallback).
 			Str("human_review_webhook", pol.Notifications.HumanReviewWebhook).
+			Str("mcp_registry_url", registryURL).
+			Dur("mcp_registry_timeout", registryTimeout).
 			Msg("reef extensions enabled")
 	} else {
 		pipe = pipeline.New(pol, auditLogger)

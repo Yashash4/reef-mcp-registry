@@ -3,6 +3,13 @@ policy_name: "default"
 
 default_action: ALLOW
 
+# Reef A-5 MCP signature registry (Atlas) configuration. Read by cmd/serve.go
+# from the REEF_MCP_REGISTRY_URL / REEF_MCP_REGISTRY_TIMEOUT_MS env vars.
+# Keys are surfaced here for documentation; operators override via env.
+reef:
+  mcp_verifier_url: "http://localhost:8080"
+  mcp_verifier_timeout_ms: 1500
+
 ingress_rules:
   - name: block_prompt_injection
     description: "Detected prompt injection attempt"
@@ -167,6 +174,32 @@ ingress_rules:
       - field: asi_category_ewma
         match_type: threshold
         value: 0.6
+
+  # ---- Reef A-5 MCP signature registry rules ----
+  # The pre-ingress hook calls Atlas BEFORE these rules run; it pre-populates
+  # mcp_bind_target_decision with the registry's allow/deny/review verdict.
+  # These rules are kept here so operators can see the bind decision flow in
+  # the policy YAML; the hook itself short-circuits with a synthetic
+  # `mcp_bind_denied_by_registry` rule name, so audits surface that name
+  # rather than these declarative matches.
+  - name: mcp_bind_denied_by_registry
+    description: "Reef MCP signature registry denied a server bind attempt"
+    priority: 200
+    action: DENY
+    deny_message: "[REEF] BIND_DENIED — unsigned or poisoned MCP server (see audit log)."
+    conditions:
+      - field: mcp_bind_target_decision
+        match_type: exact
+        value: deny
+
+  - name: mcp_bind_review_by_registry
+    description: "Reef MCP signature registry flagged a server bind for review"
+    priority: 198
+    action: HUMAN_REVIEW
+    conditions:
+      - field: mcp_bind_target_decision
+        match_type: exact
+        value: review
 
 egress_rules:
   # Reef MODIFY action (A-4): strips markdown images whose destination host
