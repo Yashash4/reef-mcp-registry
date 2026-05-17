@@ -1,0 +1,85 @@
+# Internal planning / strategy / orchestration — NOT for the public repo
+CLAUDE.md
+/docs/
+reef-overview.html
+
+# Local development memory (Claude Code per-project state)
+.firecrawl/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+secrets/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+venv/
+.venv/
+env/
+.tox/
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+dist/
+build/
+.pnpm-store/
+.turbo/
+*.tsbuildinfo
+
+# Go
+vendor/
+bin/
+*.exe
+*.test
+*.out
+
+# Logs / temp
+*.log
+*.tmp
+*.swp
+*.swo
+*~
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.iml
+
+# Docker
+docker-compose.override.yml
+
+# RL training artifacts (heavy)
+checkpoints/
+runs/
+wandb/
+*.pt
+*.pth
+*.onnx
+
+# Sigstore / keys
+*.cosign-key
+*.cosign-pub
+cosign.key
+cosign.pub
+
+# Reef-specific
+audit-logs/
+fleet-state/
+
+# Upstream Lobster Trap clone (read-only reference, not committed; A-3 will fork into lobstertrap-reef/)
+lobstertrap-upstream/

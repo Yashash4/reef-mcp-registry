@@ -1,0 +1,21 @@
+# Reef — top-level docker compose
+#
+# This is the stub that will be fleshed out as the three layers ship:
+#   - reef-registry  (MCP signature registry, Python FastAPI + ed25519)
+#   - lobstertrap-reef (Go fork of Lobster Trap with Reef extensions)
+#   - victim          (Next.js Copilot-clone — the EchoLeak target)
+#   - stage-ui        (Next.js stage / Public Safety Page)
+#   - quote           (Reef Quote / Underwriter — Gemini 3 Pro)
+#   - dast-a          (PPO adversary)
+#
+# Bring-up order will be: registry -> lobstertrap-reef -> victim -> stage-ui -> quote -> dast-a
+#
+# Each service's Dockerfile lives next to its source tree under reef/, lobstertrap-reef/, victim/, etc.
+
+version: "3.9"
+
+services: {}
+
+networks:
+  reef:
+    driver: bridge

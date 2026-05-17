@@ -1,0 +1,7 @@
+# victim/
+
+Reserved for the Victim Copilot-clone — a Next.js 14 inbox app + Gemini agent that
+reproduces the EchoLeak-class attack (CVE-2025-32711) so Reef can demonstrate
+blocking it.
+
+To be built by Agent A-2.
