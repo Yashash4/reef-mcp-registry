@@ -3,12 +3,47 @@ policy_name: "default"
 
 default_action: ALLOW
 
-# Reef A-5 MCP signature registry (Atlas) configuration. Read by cmd/serve.go
-# from the REEF_MCP_REGISTRY_URL / REEF_MCP_REGISTRY_TIMEOUT_MS env vars.
-# Keys are surfaced here for documentation; operators override via env.
+# Reef configuration. Reef extensions activate when --enable-reef is on.
+# All paths and endpoints accept env-var override via the documented vars in
+# .env.example (REEF_SVID_ISSUER_KEYS_DIR, REEF_AUDIT_DIR, REEF_OTEL_EXPORTER,
+# etc).
 reef:
+  # A-5 MCP signature registry (Atlas) sidecar.
   mcp_verifier_url: "http://localhost:8080"
   mcp_verifier_timeout_ms: 1500
+
+  # A-6 SVID JWT identity verification.
+  require_svid: true
+  svid_issuer_keys_dir: "./keys/svid-issuers"
+  svid_audience: "lobstertrap-reef"
+
+  # A-6 per-identity token-bucket rate limit.
+  rate_limit:
+    rate_per_second: 10
+    burst: 20
+
+  # A-6 EWMA OWASP ASI category tracker. Threshold is documentation-only;
+  # the actual gating rule is `review_high_asi_ewma` below.
+  ewma:
+    alpha: 0.3
+    categories: ["ASI01", "ASI06"]
+    threshold: 0.4
+
+  # A-6 Merkle audit log. Persisted to disk, signed root exported every
+  # sign_root_interval_seconds.
+  audit:
+    dir: "./audit"
+    sign_root_interval_seconds: 60
+    signer_key_path: ""
+
+  # A-6 OpenTelemetry exporter. exporter ∈ {otlp-http, stdout, none}.
+  otel:
+    exporter: "stdout"
+    endpoint: "localhost:4318"
+
+  # A-6 Sigstore-cosign-style policy bundle signer trust root. Path to the
+  # ed25519 public key the hot-reload watcher verifies new bundles against.
+  policy_signer_pub_key: "./keys/policy-signer.pub"
 
 ingress_rules:
   - name: block_prompt_injection
@@ -174,6 +209,35 @@ ingress_rules:
       - field: asi_category_ewma
         match_type: threshold
         value: 0.6
+
+  # ---- Reef A-6 identity + rate-limit + EWMA rules ----
+  # These rules fire on the metadata fields A-6 populates. The SVID and
+  # rate-limit short-circuits happen BEFORE the rule table — these declarative
+  # rules exist so an audit consumer that grep's the policy still sees the
+  # match. Note: `deny_invalid_svid` is intentionally NOT declared here as a
+  # rule because the pipeline short-circuits the SVID denial before any rule
+  # evaluation; declaring it as a rule would over-block on require_svid=false
+  # deployments. The pipeline uses synthetic rule names svid_invalid /
+  # svid_expired / svid_missing / rate_limited_per_identity so audits remain
+  # legible.
+
+  - name: review_intent_mismatch
+    description: Reef SVID — declared scope diverges from DPI-detected behaviour
+    priority: 75
+    action: HUMAN_REVIEW
+    conditions:
+      - field: intent_mismatch_score
+        match_type: threshold
+        value: 0.5
+
+  - name: review_high_asi_ewma
+    description: Reef EWMA — multi-turn OWASP ASI category accumulation exceeds threshold
+    priority: 73
+    action: HUMAN_REVIEW
+    conditions:
+      - field: asi_category_ewma
+        match_type: threshold
+        value: 0.4
 
   # ---- Reef A-5 MCP signature registry rules ----
   # The pre-ingress hook calls Atlas BEFORE these rules run; it pre-populates

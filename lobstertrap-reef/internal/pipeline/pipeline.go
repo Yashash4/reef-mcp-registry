@@ -2,6 +2,9 @@ package pipeline
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -12,7 +15,11 @@ import (
 	"github.com/Yashash4/reef-mcp-registry/lobstertrap-reef/internal/inspector"
 	"github.com/Yashash4/reef-mcp-registry/lobstertrap-reef/internal/metadata"
 	"github.com/Yashash4/reef-mcp-registry/lobstertrap-reef/internal/policy"
+	"github.com/Yashash4/reef-mcp-registry/lobstertrap-reef/pkg/identity"
 	"github.com/Yashash4/reef-mcp-registry/lobstertrap-reef/pkg/mcpsupply"
+	"github.com/Yashash4/reef-mcp-registry/lobstertrap-reef/pkg/otel"
+	"github.com/Yashash4/reef-mcp-registry/lobstertrap-reef/pkg/ratelimit"
+	"github.com/Yashash4/reef-mcp-registry/lobstertrap-reef/pkg/session"
 )
 
 var requestCounter atomic.Uint64
@@ -48,6 +55,7 @@ type Pipeline struct {
 	egressTable   *policy.MatchActionTable
 	deniedDomains []string
 	auditLogger   *audit.Logger
+	policy        *policy.Policy
 
 	enableReef bool
 	dispatcher *actions.Dispatcher
@@ -55,10 +63,16 @@ type Pipeline struct {
 	// Reef MCP signature registry sidecar verifier (A-5). When non-nil and
 	// --enable-reef is on, the pipeline calls Verify before the ingress
 	// rule table runs whenever inspector.PromptMetadata.MCPBindTarget != "".
-	// A deny decision short-circuits the rest of the pipeline with a
-	// BIND_DENIED outcome carrying the violation code Atlas returned (e.g.
-	// MCP-RCE-26.04). A review decision dispatches HUMAN_REVIEW.
 	mcpVerifier mcpsupply.Verifier
+
+	// Reef A-6 surfaces. nil-safe — when --enable-reef is off OR the
+	// individual component wasn't wired, the pipeline behaves as if it
+	// weren't present.
+	svidVerifier identity.Verifier
+	rateLimiter  ratelimit.Limiter
+	ewmaTracker  *session.Tracker
+	merkleTree   *audit.Tree
+	otelExporter otel.Exporter
 
 	observerMu sync.RWMutex
 	observers  []EventObserver
@@ -78,6 +92,16 @@ const (
 	ReasonMCPBindReview = "mcp_bind_review_by_registry"
 )
 
+// Reef A-6 synthetic rule names for SVID + rate-limit denials. The pipeline
+// short-circuits to a DENY with one of these as the RuleName so audit
+// consumers can grep on stable strings.
+const (
+	ReasonSVIDInvalid        = "svid_invalid"
+	ReasonSVIDExpired        = "svid_expired"
+	ReasonSVIDMissing        = "svid_missing"
+	ReasonRateLimitPerIdent  = "rate_limited_per_identity"
+)
+
 // New creates a new Pipeline from a loaded policy. Reef extensions are
 // disabled — call NewWithReef to opt in.
 func New(pol *policy.Policy, auditLogger *audit.Logger) *Pipeline {
@@ -88,6 +112,7 @@ func New(pol *policy.Policy, auditLogger *audit.Logger) *Pipeline {
 		egressTable:   egress,
 		deniedDomains: append([]string(nil), pol.Network.DeniedDomains...),
 		auditLogger:   auditLogger,
+		policy:        pol,
 	}
 }
 
@@ -111,6 +136,53 @@ func (p *Pipeline) WithMCPVerifier(v mcpsupply.Verifier) *Pipeline {
 	return p
 }
 
+// WithSVIDVerifier attaches the Reef SVID JWT verifier (A-6). When set, the
+// pipeline calls VerifySVID with the inbound Authorization header before
+// running the rule table. Returns the same pipeline for chaining.
+func (p *Pipeline) WithSVIDVerifier(v identity.Verifier) *Pipeline {
+	p.svidVerifier = v
+	return p
+}
+
+// WithRateLimiter attaches a per-identity rate limiter (A-6).
+func (p *Pipeline) WithRateLimiter(l ratelimit.Limiter) *Pipeline {
+	p.rateLimiter = l
+	return p
+}
+
+// WithEWMATracker attaches the OWASP ASI category EWMA tracker (A-6).
+func (p *Pipeline) WithEWMATracker(t *session.Tracker) *Pipeline {
+	p.ewmaTracker = t
+	return p
+}
+
+// WithMerkleTree attaches the audit Merkle tree (A-6). Every action verdict
+// appends a leaf with the request context.
+func (p *Pipeline) WithMerkleTree(t *audit.Tree) *Pipeline {
+	p.merkleTree = t
+	return p
+}
+
+// WithOTelExporter attaches the OpenTelemetry exporter (A-6). Every ingress
+// + egress call is wrapped in a span carrying the meta + verdict.
+func (p *Pipeline) WithOTelExporter(e otel.Exporter) *Pipeline {
+	p.otelExporter = e
+	return p
+}
+
+// MerkleTree exposes the attached Merkle tree (nil if not wired). Used by
+// integration tests + the verifier CLI.
+func (p *Pipeline) MerkleTree() *audit.Tree { return p.merkleTree }
+
+// SVIDVerifier exposes the attached SVID verifier (nil if not wired).
+func (p *Pipeline) SVIDVerifier() identity.Verifier { return p.svidVerifier }
+
+// EWMATracker exposes the attached EWMA tracker (nil if not wired).
+func (p *Pipeline) EWMATracker() *session.Tracker { return p.ewmaTracker }
+
+// RateLimiter exposes the attached rate limiter (nil if not wired).
+func (p *Pipeline) RateLimiter() ratelimit.Limiter { return p.rateLimiter }
+
 // MCPVerifier returns the attached MCP verifier (nil if A-5 was not wired).
 // Exposed for tests + introspection.
 func (p *Pipeline) MCPVerifier() mcpsupply.Verifier {
@@ -133,9 +205,77 @@ func (p *Pipeline) Dispatcher() *actions.Dispatcher {
 // ProcessIngress inspects a prompt and evaluates ingress rules.
 // declared may be nil if the agent didn't send _lobstertrap headers.
 func (p *Pipeline) ProcessIngress(promptText string, declared *metadata.RequestHeaders) *PipelineResult {
+	return p.ProcessIngressWithAuth(promptText, declared, "")
+}
+
+// ProcessIngressWithAuth is the SVID-aware ingress entrypoint. authToken is
+// the raw value of the Authorization header (with or without "Bearer "
+// prefix). When --enable-reef is on and a verifier is attached, the token
+// is verified BEFORE inspector inspection — invalid SVIDs cause an early
+// DENY when the policy's RequireSVID flag is set.
+func (p *Pipeline) ProcessIngressWithAuth(promptText string, declared *metadata.RequestHeaders, authToken string) *PipelineResult {
 	reqID := fmt.Sprintf("req-%d", requestCounter.Add(1))
 
+	// OTel span lifecycle. Span attributes are populated as the pipeline
+	// makes decisions; on End the latency is captured below.
+	var span otel.Span
+	ctx := context.Background()
+	startedAt := time.Now()
+	if p.enableReef && p.otelExporter != nil {
+		ctx, span = p.otelExporter.Start(ctx, "reef.pipeline.ingress")
+		span.SetAttribute("request.id", reqID)
+		defer func() {
+			span.SetAttribute("latency_ms", time.Since(startedAt).Milliseconds())
+			span.End()
+		}()
+	}
+
 	meta := p.inspector.Inspect(promptText)
+
+	// Reef A-6 SVID verification.
+	var svid *identity.SVID
+	if p.enableReef && p.svidVerifier != nil {
+		if authToken == "" {
+			meta.SVIDError = "ErrEmptyToken"
+			if p.policy != nil && p.policy.Reef.RequireSVID {
+				return p.dispatchSVIDDeny(reqID, ctx, span, meta, declared, ReasonSVIDMissing, "SVID_INVALID — missing Authorization header")
+			}
+		} else {
+			parsed, err := p.svidVerifier.VerifySVID(authToken)
+			if err != nil {
+				meta.SVIDError = errorSentinel(err)
+				if p.policy != nil && p.policy.Reef.RequireSVID {
+					rule := ReasonSVIDInvalid
+					msg := "SVID_INVALID — " + err.Error()
+					if errors.Is(err, identity.ErrExpired) {
+						rule = ReasonSVIDExpired
+						msg = "SVID_EXPIRED — " + err.Error()
+					}
+					return p.dispatchSVIDDeny(reqID, ctx, span, meta, declared, rule, msg)
+				}
+			} else {
+				svid = parsed
+				meta.AgentIdentityVerified = true
+				meta.SVIDSubject = svid.Subject
+				if span != nil {
+					span.SetAttribute("svid.subject", svid.Subject)
+					span.SetAttribute("svid.issuer", svid.Issuer)
+				}
+			}
+		}
+	}
+
+	// Reef A-6 per-identity rate limit. Skip if no limiter or no subject.
+	if p.enableReef && p.rateLimiter != nil && meta.SVIDSubject != "" {
+		if !p.rateLimiter.Allow(meta.SVIDSubject) {
+			meta.RateLimited = true
+			if span != nil {
+				span.SetAttribute("rate_limited", true)
+				span.AddEvent("rate_limited_per_identity")
+			}
+			return p.dispatchRateLimited(reqID, ctx, meta, declared)
+		}
+	}
 
 	// Reef A-5 pre-ingress hook: if the inspector detected an MCP server bind
 	// attempt AND a verifier is attached AND Reef is enabled, call Atlas
@@ -182,6 +322,38 @@ func (p *Pipeline) ProcessIngress(promptText string, declared *metadata.RequestH
 				Code:   v.Code,
 				Detail: v.Detail,
 			})
+		}
+	}
+
+	// Reef A-6: declared-vs-detected intent mismatch (only meaningful with a
+	// valid SVID).
+	if p.enableReef && svid != nil {
+		meta.IntentMismatchScore = identity.IntentMismatch(svid.Scope, identity.DetectedIntent{
+			IntentCategory: meta.IntentCategory,
+			Tools:          extractTools(meta),
+			Domains:        meta.TargetDomains,
+		})
+		if span != nil {
+			span.SetAttribute("intent_mismatch_score", meta.IntentMismatchScore)
+		}
+	}
+
+	// Reef A-6: EWMA over OWASP ASI categories. The classifier maps the
+	// inspector's signals onto the canonical ASI labels.
+	if p.enableReef && p.ewmaTracker != nil {
+		subject := meta.SVIDSubject
+		if subject == "" && declared != nil {
+			subject = declared.AgentID
+		}
+		if subject != "" {
+			hits := classifyASICategories(meta)
+			meta.AsiCategoryEwma = p.ewmaTracker.Update(subject, hits)
+			if span != nil {
+				span.SetAttribute("asi_category_ewma", meta.AsiCategoryEwma)
+				if len(hits) > 0 {
+					span.SetAttribute("asi_hits", hits)
+				}
+			}
 		}
 	}
 
@@ -304,6 +476,18 @@ func (p *Pipeline) ProcessIngress(promptText string, declared *metadata.RequestH
 		AgentID:         agentID,
 	})
 
+	// Reef A-6: append to the Merkle audit tree. Each ALLOW/DENY/MODIFY/
+	// REDIRECT/QUARANTINE/HUMAN_REVIEW verdict becomes a tamper-evident leaf.
+	p.appendMerkleLeaf(reqID, "ingress", meta, result, promptText)
+
+	if span != nil {
+		span.SetAttribute("action", string(result.Action))
+		if result.RuleName != "" {
+			span.SetAttribute("policy.rule_id", result.RuleName)
+		}
+		span.AddEvent("verdict." + string(result.Action))
+	}
+
 	// Notify observers
 	p.notify(PipelineEvent{
 		Timestamp: time.Now().UTC(),
@@ -319,6 +503,207 @@ func (p *Pipeline) ProcessIngress(promptText string, declared *metadata.RequestH
 	return pr
 }
 
+// dispatchSVIDDeny short-circuits the pipeline to a DENY when SVID validation
+// fails AND the policy requires SVIDs. Records the audit leaf + OTel event.
+func (p *Pipeline) dispatchSVIDDeny(reqID string, ctx context.Context, span otel.Span, meta *inspector.PromptMetadata, declared *metadata.RequestHeaders, ruleName, denyMsg string) *PipelineResult {
+	result := policy.RuleResult{
+		Matched:     true,
+		RuleName:    ruleName,
+		Action:      policy.ActionDeny,
+		DenyMessage: denyMsg,
+	}
+	pr := &PipelineResult{
+		RequestID:       reqID,
+		IngressMetadata: meta,
+		IngressResult:   &result,
+		DeclaredHeaders: declared,
+		Blocked:         true,
+		BlockedAt:       "ingress",
+		DenyMessage:     denyMsg,
+	}
+	var agentID string
+	if declared != nil {
+		agentID = declared.AgentID
+	}
+	p.auditLogger.Log(audit.Entry{
+		RequestID:   reqID,
+		Direction:   "ingress",
+		Action:      string(policy.ActionDeny),
+		RuleName:    ruleName,
+		DenyMessage: denyMsg,
+		Metadata:    meta,
+		AgentID:     agentID,
+	})
+	p.appendMerkleLeaf(reqID, "ingress", meta, result, "")
+	if span != nil {
+		span.SetAttribute("action", "DENY")
+		span.SetAttribute("policy.rule_id", ruleName)
+		span.AddEvent("svid.deny")
+	}
+	p.notify(PipelineEvent{
+		Timestamp: time.Now().UTC(),
+		Direction: "ingress",
+		RequestID: reqID,
+		Action:    policy.ActionDeny,
+		RuleName:  ruleName,
+		Metadata:  meta,
+		Blocked:   true,
+		DenyMsg:   denyMsg,
+	})
+	return pr
+}
+
+// dispatchRateLimited short-circuits the pipeline with a synthetic DENY when
+// the per-identity bucket runs dry.
+func (p *Pipeline) dispatchRateLimited(reqID string, ctx context.Context, meta *inspector.PromptMetadata, declared *metadata.RequestHeaders) *PipelineResult {
+	msg := fmt.Sprintf("RATE_LIMITED_PER_IDENTITY — subject=%q exceeded its token bucket", meta.SVIDSubject)
+	result := policy.RuleResult{
+		Matched:     true,
+		RuleName:    ReasonRateLimitPerIdent,
+		Action:      policy.ActionDeny,
+		DenyMessage: msg,
+	}
+	pr := &PipelineResult{
+		RequestID:       reqID,
+		IngressMetadata: meta,
+		IngressResult:   &result,
+		DeclaredHeaders: declared,
+		Blocked:         true,
+		BlockedAt:       "ingress",
+		DenyMessage:     msg,
+	}
+	var agentID string
+	if declared != nil {
+		agentID = declared.AgentID
+	}
+	p.auditLogger.Log(audit.Entry{
+		RequestID:   reqID,
+		Direction:   "ingress",
+		Action:      string(policy.ActionDeny),
+		RuleName:    ReasonRateLimitPerIdent,
+		DenyMessage: msg,
+		Metadata:    meta,
+		AgentID:     agentID,
+	})
+	p.appendMerkleLeaf(reqID, "ingress", meta, result, "")
+	p.notify(PipelineEvent{
+		Timestamp: time.Now().UTC(),
+		Direction: "ingress",
+		RequestID: reqID,
+		Action:    policy.ActionDeny,
+		RuleName:  ReasonRateLimitPerIdent,
+		Metadata:  meta,
+		Blocked:   true,
+		DenyMsg:   msg,
+	})
+	return pr
+}
+
+// appendMerkleLeaf records the verdict into the tamper-evident tree.
+// nil-safe (the tree may not be wired).
+func (p *Pipeline) appendMerkleLeaf(reqID, direction string, meta *inspector.PromptMetadata, result policy.RuleResult, body string) {
+	if p.merkleTree == nil {
+		return
+	}
+	bodyHash := ""
+	if body != "" {
+		// Only hash bodies up to a sane cap; otherwise we'd bloat audit
+		// payloads. The hash is still tamper-evident for the visible portion.
+		const max = 4096
+		if len(body) > max {
+			body = body[:max]
+		}
+		sum := sha256.Sum256([]byte(body))
+		bodyHash = hex.EncodeToString(sum[:])
+	}
+	_, _ = p.merkleTree.Append(audit.AuditEvent{
+		Timestamp:   time.Now().UTC(),
+		Direction:   direction,
+		RequestID:   reqID,
+		SVIDSubject: meta.SVIDSubject,
+		RuleID:      result.RuleName,
+		Action:      string(result.Action),
+		DenyMsg:     result.DenyMessage,
+		BodyHash:    bodyHash,
+		Metadata: map[string]any{
+			"intent_category":         meta.IntentCategory,
+			"risk_score":              meta.RiskScore,
+			"agent_identity_verified": meta.AgentIdentityVerified,
+			"intent_mismatch_score":   meta.IntentMismatchScore,
+			"asi_category_ewma":       meta.AsiCategoryEwma,
+		},
+	})
+}
+
+// errorSentinel returns the stable error sentinel name (e.g. "ErrExpired")
+// for the SVID error. Falls back to the error message when no sentinel
+// matches.
+func errorSentinel(err error) string {
+	switch {
+	case errors.Is(err, identity.ErrExpired):
+		return "ErrExpired"
+	case errors.Is(err, identity.ErrEmptyToken):
+		return "ErrEmptyToken"
+	case errors.Is(err, identity.ErrTokenMalformed):
+		return "ErrTokenMalformed"
+	case errors.Is(err, identity.ErrUnsupportedAlg):
+		return "ErrUnsupportedAlg"
+	case errors.Is(err, identity.ErrSignatureInvalid):
+		return "ErrSignatureInvalid"
+	case errors.Is(err, identity.ErrWrongAudience):
+		return "ErrWrongAudience"
+	case errors.Is(err, identity.ErrMissingClaim):
+		return "ErrMissingClaim"
+	case errors.Is(err, identity.ErrNotYetValid):
+		return "ErrNotYetValid"
+	case errors.Is(err, identity.ErrNoIssuerKeys):
+		return "ErrNoIssuerKeys"
+	default:
+		return err.Error()
+	}
+}
+
+// extractTools returns the set of "tool" names DPI saw the request exercise.
+// For v1 this is the union of detected commands + MCP bind target +
+// (when present) the heuristic intent label. Empty for benign prompts.
+func extractTools(meta *inspector.PromptMetadata) []string {
+	tools := make([]string, 0, len(meta.TargetCommands)+1)
+	tools = append(tools, meta.TargetCommands...)
+	if meta.MCPBindTarget != "" {
+		tools = append(tools, "mcp:"+meta.MCPBindTarget)
+	}
+	return tools
+}
+
+// classifyASICategories maps PromptMetadata signals onto OWASP "Top 10 for
+// Agentic Applications" categories. The full taxonomy lives in
+// docs/30-GLOSSARY.md; this is the v1 heuristic mapping the EWMA tracker
+// consumes. The mapping is permissive — multiple categories may fire on a
+// single prompt.
+func classifyASICategories(meta *inspector.PromptMetadata) []string {
+	var cats []string
+	if meta.ContainsInjectionPatterns {
+		cats = append(cats, "ASI01") // Memory Poisoning (prompt-injection adjacent)
+	}
+	if meta.ContainsRoleImpersonation {
+		cats = append(cats, "ASI07") // Identity Spoofing
+		cats = append(cats, "ASI04") // Privilege Compromise
+	}
+	if meta.ContainsExfiltration || meta.ContainsMarkdownImageWithExternalURL {
+		cats = append(cats, "ASI06") // Tool Misuse
+	}
+	if meta.ContainsCredentials || meta.ContainsPII {
+		cats = append(cats, "ASI10") // Capability Abuse / sensitive data
+	}
+	if meta.ContainsSystemCommands || meta.ContainsMalwareRequest {
+		cats = append(cats, "ASI08") // Resource Hijacking
+	}
+	if meta.MCPBindDecision == mcpsupply.DecisionDeny {
+		cats = append(cats, "ASI03") // Cascading Failures (supply chain breach)
+	}
+	return cats
+}
+
 // isReefAction returns true for the four Lobster Trap actions Reef ships:
 // MODIFY, REDIRECT, QUARANTINE, HUMAN_REVIEW.
 func isReefAction(a policy.Action) bool {
@@ -332,7 +717,26 @@ func isReefAction(a policy.Action) bool {
 // ProcessEgress inspects model output and evaluates egress rules.
 // Updates the existing PipelineResult with egress information.
 func (p *Pipeline) ProcessEgress(pr *PipelineResult, responseText string) {
+	var span otel.Span
+	startedAt := time.Now()
+	if p.enableReef && p.otelExporter != nil {
+		_, span = p.otelExporter.Start(context.Background(), "reef.pipeline.egress")
+		span.SetAttribute("request.id", pr.RequestID)
+		defer func() {
+			span.SetAttribute("latency_ms", time.Since(startedAt).Milliseconds())
+			span.End()
+		}()
+	}
+
 	meta := p.inspector.Inspect(responseText)
+	// Carry the verified SVID subject onto the egress meta so audit + Merkle
+	// leaves capture which agent produced the output.
+	if pr.IngressMetadata != nil {
+		meta.SVIDSubject = pr.IngressMetadata.SVIDSubject
+		meta.AgentIdentityVerified = pr.IngressMetadata.AgentIdentityVerified
+		meta.AsiCategoryEwma = pr.IngressMetadata.AsiCategoryEwma
+		meta.IntentMismatchScore = pr.IngressMetadata.IntentMismatchScore
+	}
 	result := p.egressTable.Evaluate(meta)
 
 	// Enforce network.denied_domains at egress. Upstream Lobster Trap parsed
@@ -414,6 +818,17 @@ func (p *Pipeline) ProcessEgress(pr *PipelineResult, responseText string) {
 		Metadata:    meta,
 		TokenCount:  meta.TokenCount,
 	})
+
+	// Reef A-6: Merkle audit append on egress.
+	p.appendMerkleLeaf(pr.RequestID, "egress", meta, result, responseText)
+
+	if span != nil {
+		span.SetAttribute("action", string(result.Action))
+		if result.RuleName != "" {
+			span.SetAttribute("policy.rule_id", result.RuleName)
+		}
+		span.AddEvent("verdict." + string(result.Action))
+	}
 
 	// Notify observers
 	p.notify(PipelineEvent{

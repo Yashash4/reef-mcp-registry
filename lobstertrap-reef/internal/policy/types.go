@@ -115,6 +115,85 @@ type Policy struct {
 	Network       NetworkPolicy    `yaml:"network" json:"network"`
 	Filesystem    FilesystemPolicy `yaml:"filesystem" json:"filesystem"`
 	Notifications Notifications    `yaml:"notifications,omitempty" json:"notifications,omitempty"`
+	Reef          ReefPolicy       `yaml:"reef,omitempty" json:"reef,omitempty"`
+}
+
+// ReefPolicy carries the Reef-specific knobs the A-6 deliverables consume.
+// All fields are optional; sensible defaults apply when omitted. Operators
+// override via the YAML "reef:" block (see configs/default_policy.yaml).
+type ReefPolicy struct {
+	// RequireSVID gates whether unauthenticated requests are denied. When
+	// true, missing or invalid SVIDs short-circuit the pipeline to DENY with
+	// reason "SVID_INVALID". When false (default), Reef populates
+	// agent_identity_verified=false but does not block.
+	RequireSVID bool `yaml:"require_svid,omitempty" json:"require_svid,omitempty"`
+
+	// SVIDIssuerKeysDir is the directory holding ed25519 public keys that
+	// signed valid SVIDs. Default ./keys/svid-issuers/.
+	SVIDIssuerKeysDir string `yaml:"svid_issuer_keys_dir,omitempty" json:"svid_issuer_keys_dir,omitempty"`
+
+	// SVIDAudience is the JWT audience claim Reef expects on inbound tokens.
+	// Default "lobstertrap-reef".
+	SVIDAudience string `yaml:"svid_audience,omitempty" json:"svid_audience,omitempty"`
+
+	// RateLimit configures the per-identity token bucket.
+	RateLimit ReefRateLimit `yaml:"rate_limit,omitempty" json:"rate_limit,omitempty"`
+
+	// EWMA configures the OWASP ASI category tracker.
+	EWMA ReefEWMA `yaml:"ewma,omitempty" json:"ewma,omitempty"`
+
+	// Audit configures the Merkle audit log persistence + signing cadence.
+	Audit ReefAudit `yaml:"audit,omitempty" json:"audit,omitempty"`
+
+	// Otel configures the OpenTelemetry exporter back-end.
+	Otel ReefOTel `yaml:"otel,omitempty" json:"otel,omitempty"`
+
+	// PolicySignerPubKey is the file path to the ed25519 public key the
+	// hot-reload watcher verifies new policy bundles against. Empty disables
+	// cosign-style verification (the watcher logs a warning and applies the
+	// new policy anyway — operators MUST set this in production).
+	PolicySignerPubKey string `yaml:"policy_signer_pub_key,omitempty" json:"policy_signer_pub_key,omitempty"`
+}
+
+// ReefRateLimit configures per-identity token-bucket throttling.
+type ReefRateLimit struct {
+	// RatePerSecond is the steady-state requests/second per SVID subject.
+	// Zero means "no limiter built" (operator disables per-identity throttle).
+	RatePerSecond float64 `yaml:"rate_per_second,omitempty" json:"rate_per_second,omitempty"`
+	// Burst is the bucket depth — how many requests may be queued at once.
+	Burst int `yaml:"burst,omitempty" json:"burst,omitempty"`
+}
+
+// ReefEWMA configures the per-identity OWASP ASI category EWMA tracker.
+type ReefEWMA struct {
+	// Alpha is the exponential-weight parameter (0 < alpha <= 1). Default 0.3.
+	Alpha float64 `yaml:"alpha,omitempty" json:"alpha,omitempty"`
+	// Categories names the ASI categories the tracker watches.
+	Categories []string `yaml:"categories,omitempty" json:"categories,omitempty"`
+	// Threshold is documentation-only — declarative rules with
+	// `match_type: threshold` carry the actual gating logic.
+	Threshold float64 `yaml:"threshold,omitempty" json:"threshold,omitempty"`
+}
+
+// ReefAudit configures the Merkle audit log.
+type ReefAudit struct {
+	// Dir is the persistence directory (default ./audit).
+	Dir string `yaml:"dir,omitempty" json:"dir,omitempty"`
+	// SignRootIntervalSeconds is how often the root is signed + exported.
+	// Default 60s.
+	SignRootIntervalSeconds int `yaml:"sign_root_interval_seconds,omitempty" json:"sign_root_interval_seconds,omitempty"`
+	// SignerKeyPath optionally points at an ed25519 private key used to sign
+	// the periodic root export. When empty, the root is exported unsigned
+	// (the RIA still includes the hash, just not the operator signature).
+	SignerKeyPath string `yaml:"signer_key_path,omitempty" json:"signer_key_path,omitempty"`
+}
+
+// ReefOTel configures OpenTelemetry tracing.
+type ReefOTel struct {
+	// Exporter selects "otlp-http", "stdout", "none". Default "stdout".
+	Exporter string `yaml:"exporter,omitempty" json:"exporter,omitempty"`
+	// Endpoint is the OTLP collector host:port (only consumed by "otlp-http").
+	Endpoint string `yaml:"endpoint,omitempty" json:"endpoint,omitempty"`
 }
 
 // MatchActionTable holds a sorted list of rules and a default action.

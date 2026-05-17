@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"crypto/ed25519"
 	"fmt"
 	"net/http"
 	"os"
@@ -19,7 +20,12 @@ import (
 	"github.com/Yashash4/reef-mcp-registry/lobstertrap-reef/internal/policy"
 	"github.com/Yashash4/reef-mcp-registry/lobstertrap-reef/internal/proxy"
 	"github.com/Yashash4/reef-mcp-registry/lobstertrap-reef/internal/quarantine"
+	"github.com/Yashash4/reef-mcp-registry/lobstertrap-reef/pkg/identity"
 	"github.com/Yashash4/reef-mcp-registry/lobstertrap-reef/pkg/mcpsupply"
+	"github.com/Yashash4/reef-mcp-registry/lobstertrap-reef/pkg/otel"
+	"github.com/Yashash4/reef-mcp-registry/lobstertrap-reef/pkg/policysync"
+	"github.com/Yashash4/reef-mcp-registry/lobstertrap-reef/pkg/ratelimit"
+	"github.com/Yashash4/reef-mcp-registry/lobstertrap-reef/pkg/session"
 )
 
 // reefLoggerAdapter bridges actions.Logger over zerolog so action handlers
@@ -153,12 +159,158 @@ func runServe(cmd *cobra.Command, args []string) error {
 		verifier := mcpsupply.NewHTTPVerifier(registryURL, registryTimeout)
 		pipe = pipe.WithMCPVerifier(verifier)
 
+		// Reef A-6: SVID JWT identity verification.
+		svidKeysDir := pol.Reef.SVIDIssuerKeysDir
+		if svidKeysDir == "" {
+			svidKeysDir = os.Getenv("REEF_SVID_ISSUER_KEYS_DIR")
+		}
+		if svidKeysDir == "" {
+			svidKeysDir = "./keys/svid-issuers"
+		}
+		svidAudience := pol.Reef.SVIDAudience
+		if svidAudience == "" {
+			svidAudience = "lobstertrap-reef"
+		}
+		if _, statErr := os.Stat(svidKeysDir); statErr == nil {
+			svidVerifier, sErr := identity.NewJWTVerifier(identity.VerifierConfig{
+				ExpectedAudience: svidAudience,
+				IssuerKeysDir:    svidKeysDir,
+			})
+			if sErr != nil {
+				logger.Warn().Err(sErr).Str("dir", svidKeysDir).Msg("SVID verifier disabled — operator action required for production")
+			} else {
+				pipe = pipe.WithSVIDVerifier(svidVerifier)
+				logger.Info().
+					Strs("svid_issuer_keys", svidVerifier.KeyIDs()).
+					Str("svid_audience", svidAudience).
+					Msg("SVID verifier enabled")
+			}
+		} else {
+			logger.Warn().Str("dir", svidKeysDir).Msg("SVID issuer keys dir missing — SVID verifier disabled")
+		}
+
+		// Reef A-6: per-identity rate limiter.
+		rl := pol.Reef.RateLimit
+		if rl.RatePerSecond > 0 && rl.Burst > 0 {
+			lim, rErr := ratelimit.New(ratelimit.Config{
+				Rate:  rl.RatePerSecond,
+				Burst: rl.Burst,
+			})
+			if rErr != nil {
+				logger.Warn().Err(rErr).Msg("rate limiter disabled")
+			} else {
+				pipe = pipe.WithRateLimiter(lim)
+				logger.Info().
+					Float64("rate_per_sec", rl.RatePerSecond).
+					Int("burst", rl.Burst).
+					Msg("per-identity rate limiter enabled")
+			}
+		}
+
+		// Reef A-6: EWMA ASI category tracker.
+		ew := pol.Reef.EWMA
+		if ew.Alpha > 0 && len(ew.Categories) > 0 {
+			tracker, eErr := session.NewTracker(session.TrackerConfig{
+				Alpha:      ew.Alpha,
+				Categories: ew.Categories,
+			})
+			if eErr != nil {
+				logger.Warn().Err(eErr).Msg("EWMA tracker disabled")
+			} else {
+				pipe = pipe.WithEWMATracker(tracker)
+				logger.Info().
+					Float64("alpha", ew.Alpha).
+					Strs("categories", ew.Categories).
+					Float64("threshold", ew.Threshold).
+					Msg("EWMA ASI tracker enabled")
+			}
+		}
+
+		// Reef A-6: Merkle audit tree.
+		auditDir := pol.Reef.Audit.Dir
+		if auditDir == "" {
+			auditDir = os.Getenv("REEF_AUDIT_DIR")
+		}
+		if auditDir == "" {
+			auditDir = "./audit"
+		}
+		merkle, mErr := audit.NewTree(auditDir)
+		if mErr != nil {
+			logger.Warn().Err(mErr).Str("dir", auditDir).Msg("Merkle audit tree disabled")
+		} else {
+			if pol.Reef.Audit.SignerKeyPath != "" {
+				keyBytes, kErr := os.ReadFile(pol.Reef.Audit.SignerKeyPath)
+				if kErr == nil {
+					if priv, pErr := policysync.ParsePrivateKey(keyBytes); pErr == nil {
+						merkle.SetRootSigner(ed25519.PrivateKey(priv))
+					} else {
+						logger.Warn().Err(pErr).Msg("Merkle root signer parse failed")
+					}
+				} else {
+					logger.Warn().Err(kErr).Msg("Merkle root signer read failed")
+				}
+			}
+			if replayed, rErr := merkle.Replay(); rErr != nil {
+				logger.Warn().Err(rErr).Msg("Merkle replay failed — tree starts empty")
+			} else if replayed > 0 {
+				logger.Info().Int("leaves", replayed).Msg("Merkle audit tree replayed from disk")
+			}
+			pipe = pipe.WithMerkleTree(merkle)
+			logger.Info().Str("dir", auditDir).Msg("Merkle audit tree enabled")
+
+			// Periodic signed root export every reef.audit.sign_root_interval_seconds.
+			interval := pol.Reef.Audit.SignRootIntervalSeconds
+			if interval <= 0 {
+				interval = 60
+			}
+			go func() {
+				ticker := time.NewTicker(time.Duration(interval) * time.Second)
+				defer ticker.Stop()
+				for range ticker.C {
+					root, sig, count, _ := merkle.SignedRoot()
+					if root == "" {
+						continue
+					}
+					logger.Info().
+						Str("root", root).
+						Str("signature", sig).
+						Int("count", count).
+						Msg("merkle signed root export")
+				}
+			}()
+		}
+
+		// Reef A-6: OpenTelemetry exporter.
+		otelKind := pol.Reef.Otel.Exporter
+		if otelKind == "" {
+			otelKind = os.Getenv("REEF_OTEL_EXPORTER")
+		}
+		if otelKind == "" {
+			otelKind = "stdout"
+		}
+		otelEndpoint := pol.Reef.Otel.Endpoint
+		if otelEndpoint == "" {
+			otelEndpoint = os.Getenv("REEF_OTEL_ENDPOINT")
+		}
+		exp, oErr := otel.New(otel.Config{
+			Kind:        otel.ExporterKind(otelKind),
+			Endpoint:    otelEndpoint,
+			ServiceName: "lobstertrap-reef",
+			Insecure:    true,
+		})
+		if oErr != nil {
+			logger.Warn().Err(oErr).Str("kind", otelKind).Msg("OTel exporter degraded — falling back to no-op")
+		}
+		pipe = pipe.WithOTelExporter(exp)
+		logger.Info().Str("exporter", string(exp.Kind())).Msg("OpenTelemetry exporter enabled")
+
 		logger.Info().
 			Str("quarantine_dir", store.Dir()).
 			Str("redirect_fallback", redirectFallback).
 			Str("human_review_webhook", pol.Notifications.HumanReviewWebhook).
 			Str("mcp_registry_url", registryURL).
 			Dur("mcp_registry_timeout", registryTimeout).
+			Bool("require_svid", pol.Reef.RequireSVID).
 			Msg("reef extensions enabled")
 	} else {
 		pipe = pipeline.New(pol, auditLogger)

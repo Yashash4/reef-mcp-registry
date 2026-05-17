@@ -152,6 +152,12 @@ func getFieldValue(field string, meta *inspector.PromptMetadata) any {
 		return meta.IntentMismatchScore
 	case "asi_category_ewma":
 		return meta.AsiCategoryEwma
+	case "svid_subject":
+		return meta.SVIDSubject
+	case "svid_error":
+		return meta.SVIDError
+	case "rate_limited":
+		return meta.RateLimited
 	// Reef A-5 MCP supply chain fields. mcp_bind_target_decision is populated
 	// by the pre-ingress verifier hook (see internal/pipeline/pipeline.go);
 	// values are "allow", "deny", "review", or empty when no bind was

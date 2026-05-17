@@ -75,9 +75,11 @@ func (gp *GuardProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Extract prompt text and run ingress DPI with declared headers
+	// Extract prompt text and run ingress DPI with declared headers + SVID
+	// (when present).
 	promptText := ExtractPromptText(chatReq)
-	result := gp.pipe.ProcessIngress(promptText, chatReq.LobsterTrap)
+	authToken := r.Header.Get("Authorization")
+	result := gp.pipe.ProcessIngressWithAuth(promptText, chatReq.LobsterTrap, authToken)
 
 	gp.logger.Info().
 		Str("request_id", result.RequestID).
@@ -152,6 +154,12 @@ func (gp *GuardProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		headers := result.BuildResponseHeaders()
 		denyResp := MakeDenyResponse(result.DenyMessage, chatReq.Model, headers)
+		// Reef A-6 ratelimit signal: surface the reset hint so the client
+		// can back off intelligently. The bucket refills at the rate configured
+		// in policy.reef.rate_limit.rate_per_second.
+		if result.IngressResult != nil && result.IngressResult.RuleName == pipeline.ReasonRateLimitPerIdent {
+			w.Header().Set("X-Reef-Rate-Limit-Reset", "1")
+		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(denyResp)

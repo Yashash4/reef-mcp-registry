@@ -38,11 +38,26 @@ type PromptMetadata struct {
 	ExfilCandidates                      []ExfilCandidate `json:"exfil_candidates,omitempty"`
 
 	// Reef agent/session fields — declared in A-4, populated by A-6
-	// (SVID/EWMA package). Default zero-value until A-6 lands. Exposed here
-	// so YAML rules can already match on them today.
+	// (SVID/EWMA package). Exposed here so YAML rules can match on them.
 	AgentIdentityVerified bool    `json:"agent_identity_verified,omitempty"`
 	IntentMismatchScore   float64 `json:"intent_mismatch_score,omitempty"`
 	AsiCategoryEwma       float64 `json:"asi_category_ewma,omitempty"`
+
+	// SVIDSubject is the verified `sub` claim from the inbound JWT SVID.
+	// Empty when the request had no SVID or verification failed (in which
+	// case AgentIdentityVerified is also false).
+	SVIDSubject string `json:"svid_subject,omitempty"`
+
+	// SVIDError is the stable error sentinel returned by the JWT verifier on
+	// failure (e.g. "ErrExpired", "ErrWrongAudience"). Used by audit logs to
+	// surface why an identity check failed. Empty when verification succeeded
+	// or no token was supplied.
+	SVIDError string `json:"svid_error,omitempty"`
+
+	// RateLimited is true when the per-identity token bucket denied the
+	// request. The pipeline dispatches a synthetic DENY with reason
+	// RATE_LIMITED_PER_IDENTITY when this is set.
+	RateLimited bool `json:"rate_limited,omitempty"`
 
 	// Reef MCP supply-chain field (A-5). When the prompt mentions an MCP
 	// server bind attempt (regex-heuristic — `mcp://`, `bind_mcp(name,...)`,
