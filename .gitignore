@@ -70,6 +70,11 @@ wandb/
 *.pt
 *.pth
 *.onnx
+# Exception: ship the small DAST-A pre-trained PPO baseline (~170 KB MLP
+# policy) so demos / tests load weights without a 12k-step pre-training pass.
+!reef/control-plane/dast_a/checkpoints/
+!reef/control-plane/dast_a/checkpoints/dast_a_baseline.zip
+!reef/control-plane/dast_a/checkpoints/.gitkeep
 
 # Sigstore / keys
 *.cosign-key

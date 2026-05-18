@@ -1,0 +1,13 @@
+# Local runtime artifacts — not committed.
+data/*
+!data/.gitkeep
+checkpoints/*
+!checkpoints/.gitkeep
+!checkpoints/dast_a_baseline.zip
+
+# Standard Python noise (redundant w/ repo root .gitignore, kept for clarity).
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
