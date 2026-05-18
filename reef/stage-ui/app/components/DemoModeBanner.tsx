@@ -52,14 +52,18 @@ export function DemoModeBanner() {
             Demo Mode
           </span>
           <span className="text-text-2">
-            Backend services unreachable. Data is mocked but realistic — every
-            shape matches the production pydantic models.{" "}
+            Live preview with realistic mock data.{" "}
             <span className="text-text-3">
-              Run the full stack locally with{" "}
-              <code className="font-mono text-[12px] px-1 py-0.5 rounded bg-surface-2 border border-border text-amber/90">
-                docker compose up
-              </code>{" "}
-              for live numbers.
+              Full source, signed RIA, and reproducible benchmarks on{" "}
+              <a
+                href="https://github.com/Yashash4/reef-mcp-registry"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline decoration-amber/40 hover:decoration-amber transition-colors text-amber/90"
+              >
+                GitHub
+              </a>
+              .
             </span>
           </span>
         </div>
