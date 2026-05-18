@@ -67,11 +67,56 @@ services:
     networks:
       - reef
 
+  quote:
+    build:
+      context: ./reef/control-plane/quote
+      dockerfile: Dockerfile
+    image: reef/quote:dev
+    container_name: reef-quote
+    environment:
+      - REEF_QUOTE_DATA_DIR=/data
+      - REEF_QUOTE_SAMPLES_DIR=/samples
+      - REEF_QUOTE_SIGNER_PRIV_KEY=/keys/quote-signer.key
+      - REEF_QUOTE_SIGNER_PUB_KEY=/keys/quote-signer.pub
+      - REEF_QUOTE_SIGNER_KEY_ID=reef-quote-prod-signer
+      - REEF_QUOTE_SAMPLE_ON_BOOT=true
+      - REEF_QUOTE_HOST=0.0.0.0
+      - REEF_QUOTE_PORT=8082
+      - REEF_ATLAS_URL=http://atlas:8080
+      - REEF_POLICY_BUS_ADMIN_URL=http://policy-bus:50052
+      - REEF_DAST_A_URL=http://dast-a:8088
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - GEMINI_PRO_MODEL=${GEMINI_PRO_MODEL:-gemini-2.0-pro-exp}
+      - REEF_UNDERWRITER_COVERAGE_AMOUNT_USD=${REEF_UNDERWRITER_COVERAGE_AMOUNT_USD:-5000000}
+    ports:
+      - "8082:8082"
+    volumes:
+      - quote-data:/data
+      - quote-keys:/keys
+      # Mount the host samples dir so the committed sample-ria.pdf is the
+      # one the container serves (instead of re-generating a fresh one on
+      # every boot). Read-only because the boot helper only writes here
+      # when REEF_QUOTE_SAMPLE_ON_BOOT triggers a regeneration.
+      - ./reef/control-plane/quote/samples:/samples
+    depends_on:
+      - atlas
+      - policy-bus
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8082/healthz').status==200 else 1)\""]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+    networks:
+      - reef
+
 volumes:
   atlas-data:
   atlas-keys:
   policy-bus-data:
   policy-bus-keys:
+  quote-data:
+  quote-keys:
 
 networks:
   reef:

@@ -86,5 +86,17 @@ cosign.pub
 audit-logs/
 fleet-state/
 
+# Reef Quote (Layer 7) — RIA generator
+# The sample RIA + detached signature + sample-signer.pub get committed for
+# judges to download + verify. The private key + scratch working dir do not.
+# Note: we blocklist subdirectories rather than the data/keys dirs themselves
+# so .gitkeep files inside stay tracked (preserves the directory layout in
+# fresh clones).
+reef/control-plane/quote/data/ria/
+reef/control-plane/quote/keys/*
+!reef/control-plane/quote/keys/.gitkeep
+reef/control-plane/quote/samples/.keys/
+reef/control-plane/quote/samples/.working/
+
 # Upstream Lobster Trap clone (read-only reference, not committed; A-3 will fork into lobstertrap-reef/)
 lobstertrap-upstream/
