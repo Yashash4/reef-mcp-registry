@@ -34,6 +34,11 @@ yarn-error.log*
 .env*
 !.env.example
 !.env.local.example
+# .env.production is the Vercel build-time config (DEMO_MODE=true + all
+# backend URLs blank). It contains no secrets — only public toggles
+# inlined into the browser bundle via NEXT_PUBLIC_*. Committing it is
+# required for Vercel to pick up the demo-mode flag at build time.
+!.env.production
 
 # vercel
 .vercel
