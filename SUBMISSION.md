@@ -18,7 +18,7 @@ the same source of truth.
 
 > Reef is the signed supply chain for MCP servers — and the only AI firewall that outputs an underwriter-scorable evidence artifact.
 >
-> In April 2026, Anthropic disclosed an MCP STDIO RCE affecting 7,000+ vulnerable servers and 150 million+ downloads. The MCP ecosystem has no centralized signature registry today; every enterprise running agents that bind to MCP servers is one poisoned package away from cross-fleet compromise. Reef ships the open-source Sigstore-style registry, runtime verifier, and audit pipeline that closes this gap.
+> In April 2026, OX Security disclosed an architectural command-injection flaw in Anthropic's Model Context Protocol — affecting 7,000+ vulnerable servers and 150 million+ downloads. The MCP ecosystem has no centralized signature registry today; every enterprise running agents that bind to MCP servers is one poisoned package away from cross-fleet compromise. Reef ships the open-source Sigstore-style registry, runtime verifier, and audit pipeline that closes this gap.
 >
 > Built on MIT-licensed Lobster Trap. Every MCP bind goes through Sigstore signature verification against a fleet-approved registry — unsigned origins are denied at handshake. The same engine catches LLM-layer attacks: every agent gets a SPIFFE-shaped SVID identity, every policy ships as a cosigned bundle pushed across the fleet in seconds, every decision lands in a Merkle-anchored audit log. EchoLeak (CVE-2025-32711, the June 2025 zero-click Microsoft Copilot exfil) blocked in 1.2 seconds; Microsoft took 5 months to patch.
 >
