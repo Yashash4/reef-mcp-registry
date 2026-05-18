@@ -198,7 +198,7 @@ export function MCPRegistryBeat({
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-text-3 mono">latency</span>
-                <span className="mono text-emerald">&lt; 12 ms p99</span>
+                <span className="mono text-emerald">single-digit-ms</span>
               </div>
             </div>
           </aside>
@@ -336,8 +336,8 @@ function BindDeniedPunch({ step }: { step: Step }) {
             className="flex items-center justify-center min-h-[260px]"
           >
             <div className="text-text-3 mono text-xs uppercase tracking-widest text-center max-w-md">
-              Replays the canonical April 2026 Anthropic MCP RCE — Atlas
-              denies the bind in under 12 ms.
+              Replays the canonical April 2026 Anthropic MCP RCE. Atlas
+              denies the bind with single-digit-ms latency on the demo workload.
             </div>
           </motion.div>
         )}
