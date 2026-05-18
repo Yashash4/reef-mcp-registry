@@ -41,9 +41,9 @@ Verified against [4 named attack packs](./reef/control-plane/dast_a/app/packs/se
 | | |
 |---|---|
 | **Live preview (DEMO MODE)** | **https://reef-mcp-registry.vercel.app** |
-| **Lablab submission (video + slides)** | **https://lablab.ai/ai-hackathons/techex-intelligent-enterprise-solutions-hackathon/tripod/reef-signed-supply-chain-underwriter-for-ai** |
 | Signed RIA PDF (offline-verifiable) | [`reef/control-plane/quote/samples/sample-ria.pdf`](./reef/control-plane/quote/samples/sample-ria.pdf), or download from the live preview at [`/samples/sample-ria.pdf`](https://reef-mcp-registry.vercel.app/samples/sample-ria.pdf) |
-| TechEx 2026 hackathon (event hub) | https://lablab.ai/ai-hackathons/techex-intelligent-enterprise-solutions-hackathon |
+| 5-minute walkthrough video | Linked on the lablab submission page (TechEx 2026 row below) |
+| TechEx 2026 hackathon submission | https://lablab.ai/ai-hackathons/techex-intelligent-enterprise-solutions-hackathon/tripod/reef-signed-supply-chain-underwriter-for-ai |
 | Built on | [veeainc/lobstertrap](https://github.com/veeainc/lobstertrap), MIT, pinned at `e49a402864104c19c9a560ad73e06d5493e5d876` |
 
 ---
