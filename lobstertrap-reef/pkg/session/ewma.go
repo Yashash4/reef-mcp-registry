@@ -32,10 +32,14 @@ import (
 	"errors"
 	"strings"
 	"sync"
+
+	"github.com/Yashash4/reef-mcp-registry/lobstertrap-reef/internal/defaults"
 )
 
-// DefaultCapacity caps tracked identities.
-const DefaultCapacity = 10_000
+// DefaultCapacity caps tracked identities. Re-exported from
+// internal/defaults so external callers don't need to know about the
+// internal package.
+const DefaultCapacity = defaults.LRUEWMACapacity
 
 // Errors.
 var (

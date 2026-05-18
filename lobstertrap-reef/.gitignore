@@ -18,3 +18,9 @@ Thumbs.db
 # Audit logs
 *.jsonl
 audit.log
+
+# Local dev helpers (host-specific WSL/Win path wrappers)
+.tools/
+
+# Race detector run log (regenerated via `make test-race`)
+race-test.log

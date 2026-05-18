@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"testing"
@@ -41,10 +42,11 @@ ingress_rules:
 	pipe := NewWithReef(pol, audit.NopLogger(), nil, true).WithMerkleTree(tree)
 
 	// 3 ingress calls + 1 egress call → 4 leaves.
-	pr1 := pipe.ProcessIngressWithAuth("hello reef", nil, "")
-	pipe.ProcessEgress(pr1, "hi, how can I help?")
-	pipe.ProcessIngressWithAuth("how are you?", nil, "")
-	pipe.ProcessIngressWithAuth("thanks!", nil, "")
+	ctx := context.Background()
+	pr1 := pipe.ProcessIngressWithAuth(ctx, "hello reef", nil, "")
+	pipe.ProcessEgress(ctx, pr1, "hi, how can I help?")
+	pipe.ProcessIngressWithAuth(ctx, "how are you?", nil, "")
+	pipe.ProcessIngressWithAuth(ctx, "thanks!", nil, "")
 
 	if got := tree.Count(); got != 4 {
 		t.Errorf("Count=%d want 4", got)

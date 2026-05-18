@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"strings"
@@ -66,13 +67,13 @@ reef:
 
 	// First 3 requests should pass.
 	for i := 0; i < 3; i++ {
-		pr := pipe.ProcessIngressWithAuth("hello", nil, tok)
+		pr := pipe.ProcessIngressWithAuth(context.Background(), "hello", nil, tok)
 		if pr.Blocked {
 			t.Errorf("request %d blocked unexpectedly: %s", i+1, pr.DenyMessage)
 		}
 	}
 	// 4th should be rate-limited.
-	pr := pipe.ProcessIngressWithAuth("hello", nil, tok)
+	pr := pipe.ProcessIngressWithAuth(context.Background(), "hello", nil, tok)
 	if !pr.Blocked {
 		t.Fatal("expected rate-limit DENY on burst-overflow")
 	}

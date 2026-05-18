@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/Yashash4/reef-mcp-registry/lobstertrap-reef/internal/defaults"
 	"github.com/Yashash4/reef-mcp-registry/lobstertrap-reef/internal/policy"
 )
 
@@ -49,7 +50,7 @@ func (h *httpPoster) Post(ctx context.Context, url string, payload HumanReviewPa
 		return nil, fmt.Errorf("human_review: marshal payload: %w", err)
 	}
 	if timeout <= 0 {
-		timeout = 1500 * time.Millisecond
+		timeout = defaults.HumanReviewWebhookTimeout
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -96,11 +97,12 @@ func (d *Dispatcher) runHumanReview(ctx context.Context, dec Decision) Outcome {
 	reviewID := newReviewID()
 	timeoutMs := d.policy.Notifications.HumanReviewTimeoutMs
 	if timeoutMs <= 0 {
-		timeoutMs = 1500
+		timeoutMs = int(defaults.HumanReviewWebhookTimeout / time.Millisecond)
 	}
 	retryAfter := d.policy.Notifications.HumanReviewRetryAfterSeconds
 	if retryAfter <= 0 {
-		retryAfter = 30 // sensible default — let the agent back off ~30s.
+		// Default Retry-After: let the agent back off (see defaults pkg).
+		retryAfter = int(defaults.HumanReviewRetryAfter / time.Second)
 	}
 
 	payload := HumanReviewPayload{

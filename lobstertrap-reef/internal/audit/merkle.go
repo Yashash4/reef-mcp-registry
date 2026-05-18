@@ -48,18 +48,27 @@ func cryptoRandRead(p []byte) (int, error) {
 }
 
 // AuditEvent is the canonical leaf payload.
+//
+// BodyTruncated is set to true when the source body exceeded
+// defaults.AuditBodyTruncationBytes and was clipped before BodyHash was
+// computed. Verifier tooling reads this field to decide whether to compare
+// hashes byte-for-byte (BodyTruncated == false) or only as a "first-N-bytes
+// match" (BodyTruncated == true). Refinement R-B6 (Phase B Round 1 Batch B)
+// added this field — older trees without the field default to false, which
+// is the safe interpretation for legacy leaves under the old 4 KiB cap.
 type AuditEvent struct {
-	EventID    string    `json:"event_id"`
-	Timestamp  time.Time `json:"timestamp"`
-	Direction  string    `json:"direction"` // "ingress" or "egress"
-	RequestID  string    `json:"request_id"`
-	AgentID    string    `json:"agent_id,omitempty"`
-	SVIDSubject string   `json:"svid_subject,omitempty"`
-	RuleID     string    `json:"rule_id,omitempty"`
-	Action     string    `json:"action"`
-	DenyMsg    string    `json:"deny_message,omitempty"`
-	BodyHash   string    `json:"body_hash,omitempty"`
-	Metadata   any       `json:"metadata,omitempty"`
+	EventID       string    `json:"event_id"`
+	Timestamp     time.Time `json:"timestamp"`
+	Direction     string    `json:"direction"` // "ingress" or "egress"
+	RequestID     string    `json:"request_id"`
+	AgentID       string    `json:"agent_id,omitempty"`
+	SVIDSubject   string    `json:"svid_subject,omitempty"`
+	RuleID        string    `json:"rule_id,omitempty"`
+	Action        string    `json:"action"`
+	DenyMsg       string    `json:"deny_message,omitempty"`
+	BodyHash      string    `json:"body_hash,omitempty"`
+	BodyTruncated bool      `json:"body_truncated,omitempty"`
+	Metadata      any       `json:"metadata,omitempty"`
 }
 
 // Errors returned by the Merkle layer.

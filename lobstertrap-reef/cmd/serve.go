@@ -3,11 +3,14 @@ package cmd
 import (
 	"context"
 	"crypto/ed25519"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -15,6 +18,7 @@ import (
 
 	"github.com/Yashash4/reef-mcp-registry/lobstertrap-reef/internal/audit"
 	"github.com/Yashash4/reef-mcp-registry/lobstertrap-reef/internal/dashboard"
+	"github.com/Yashash4/reef-mcp-registry/lobstertrap-reef/internal/defaults"
 	"github.com/Yashash4/reef-mcp-registry/lobstertrap-reef/internal/engine/actions"
 	"github.com/Yashash4/reef-mcp-registry/lobstertrap-reef/internal/pipeline"
 	"github.com/Yashash4/reef-mcp-registry/lobstertrap-reef/internal/policy"
@@ -77,8 +81,8 @@ var serveCmd = &cobra.Command{
 
 func init() {
 	serveCmd.Flags().StringVar(&policyFile, "policy", "configs/default_policy.yaml", "Path to policy YAML file")
-	serveCmd.Flags().StringVar(&listenAddr, "listen", ":8080", "Address to listen on")
-	serveCmd.Flags().StringVar(&backendURL, "backend", "http://localhost:11434", "Backend LLM server URL")
+	serveCmd.Flags().StringVar(&listenAddr, "listen", defaults.DefaultListenAddr, "Address to listen on")
+	serveCmd.Flags().StringVar(&backendURL, "backend", defaults.DefaultBackendURL, "Backend LLM server URL")
 	serveCmd.Flags().StringVar(&auditFile, "audit-log", "", "Path to audit log file (default: stderr)")
 	serveCmd.Flags().BoolVar(&noDashboard, "no-dashboard", false, "Disable the real-time dashboard")
 }
@@ -111,6 +115,14 @@ func runServe(cmd *cobra.Command, args []string) error {
 		auditLogger = audit.NewStderrLogger()
 	}
 
+	// Shared root context for long-running background goroutines (Merkle
+	// signed-root export, gRPC policy bus client, dashboard). Cancelled on
+	// SIGINT/SIGTERM so every goroutine drops cleanly during shutdown.
+	// Refinement R-B4 (Phase B): the Merkle ticker goroutine now consumes
+	// this ctx so it stops emitting on shutdown.
+	rootCtx, stopRootCtx := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stopRootCtx()
+
 	// Create pipeline. When --enable-reef is on, build the action dispatcher
 	// + quarantine store and wire them. When off, fall back to the upstream
 	// pipeline.New path so vanilla Lobster Trap behaviour is preserved.
@@ -123,7 +135,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		}
 		redirectFallback := os.Getenv("REEF_REDIRECT_TARGET")
 		if redirectFallback == "" {
-			redirectFallback = "http://localhost:8765/gemma-stub"
+			redirectFallback = defaults.DefaultRedirectFallback
 		}
 		// If the policy YAML didn't set the webhook, pick it up from the env.
 		if pol.Notifications.HumanReviewWebhook == "" {
@@ -148,9 +160,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 		// hostname; tests + local runs can point it at http://localhost:8080.
 		registryURL := os.Getenv("REEF_MCP_REGISTRY_URL")
 		if registryURL == "" {
-			registryURL = "http://localhost:8080"
+			registryURL = defaults.DefaultMCPRegistryURL
 		}
-		registryTimeout := 1500 * time.Millisecond
+		registryTimeout := defaults.MCPRegistryRequestTimeout
 		if v := os.Getenv("REEF_MCP_REGISTRY_TIMEOUT_MS"); v != "" {
 			if ms, perr := strconv.Atoi(v); perr == nil && ms > 0 {
 				registryTimeout = time.Duration(ms) * time.Millisecond
@@ -160,6 +172,13 @@ func runServe(cmd *cobra.Command, args []string) error {
 		pipe = pipe.WithMCPVerifier(verifier)
 
 		// Reef A-6: SVID JWT identity verification.
+		//
+		// Refinement R-B3 (Phase B): when `pol.Reef.RequireSVID == true` we
+		// MUST fail-closed at boot if the verifier cannot be built. The
+		// previous behaviour logged a warning and continued silently — a
+		// misconfigured production node would then allow every
+		// unauthenticated agent through. Boot-time fail-closed is the only
+		// honest behaviour here.
 		svidKeysDir := pol.Reef.SVIDIssuerKeysDir
 		if svidKeysDir == "" {
 			svidKeysDir = os.Getenv("REEF_SVID_ISSUER_KEYS_DIR")
@@ -171,22 +190,29 @@ func runServe(cmd *cobra.Command, args []string) error {
 		if svidAudience == "" {
 			svidAudience = "lobstertrap-reef"
 		}
-		if _, statErr := os.Stat(svidKeysDir); statErr == nil {
-			svidVerifier, sErr := identity.NewJWTVerifier(identity.VerifierConfig{
-				ExpectedAudience: svidAudience,
-				IssuerKeysDir:    svidKeysDir,
-			})
-			if sErr != nil {
-				logger.Warn().Err(sErr).Str("dir", svidKeysDir).Msg("SVID verifier disabled — operator action required for production")
-			} else {
-				pipe = pipe.WithSVIDVerifier(svidVerifier)
-				logger.Info().
-					Strs("svid_issuer_keys", svidVerifier.KeyIDs()).
-					Str("svid_audience", svidAudience).
-					Msg("SVID verifier enabled")
+		svidVerifier, svidWired, sErr := buildSVIDVerifier(svidKeysDir, svidAudience)
+		if pol.Reef.RequireSVID {
+			if !svidWired {
+				return fmt.Errorf(
+					"reef: policy.reef.require_svid=true but SVID verifier could not be constructed: %w (issuer_keys_dir=%q audience=%q) — refusing to boot in fail-OPEN mode",
+					sErr, svidKeysDir, svidAudience,
+				)
 			}
+			logger.Info().
+				Strs("svid_issuer_keys", svidVerifier.KeyIDs()).
+				Str("svid_audience", svidAudience).
+				Bool("require_svid", true).
+				Msg("SVID verifier enabled (fail-closed boot)")
+			pipe = pipe.WithSVIDVerifier(svidVerifier)
+		} else if svidWired {
+			pipe = pipe.WithSVIDVerifier(svidVerifier)
+			logger.Info().
+				Strs("svid_issuer_keys", svidVerifier.KeyIDs()).
+				Str("svid_audience", svidAudience).
+				Msg("SVID verifier enabled")
 		} else {
-			logger.Warn().Str("dir", svidKeysDir).Msg("SVID issuer keys dir missing — SVID verifier disabled")
+			logger.Warn().Err(sErr).Str("dir", svidKeysDir).
+				Msg("SVID verifier disabled — operator action required for production (require_svid=false)")
 		}
 
 		// Reef A-6: per-identity rate limiter.
@@ -259,25 +285,14 @@ func runServe(cmd *cobra.Command, args []string) error {
 			logger.Info().Str("dir", auditDir).Msg("Merkle audit tree enabled")
 
 			// Periodic signed root export every reef.audit.sign_root_interval_seconds.
-			interval := pol.Reef.Audit.SignRootIntervalSeconds
+			// Refinement R-B4: respect rootCtx so we drop cleanly on SIGTERM
+			// instead of leaking on shutdown.
+			interval := time.Duration(pol.Reef.Audit.SignRootIntervalSeconds) * time.Second
 			if interval <= 0 {
-				interval = 60
+				interval = defaults.MerkleSignedRootInterval
 			}
-			go func() {
-				ticker := time.NewTicker(time.Duration(interval) * time.Second)
-				defer ticker.Stop()
-				for range ticker.C {
-					root, sig, count, _ := merkle.SignedRoot()
-					if root == "" {
-						continue
-					}
-					logger.Info().
-						Str("root", root).
-						Str("signature", sig).
-						Int("count", count).
-						Msg("merkle signed root export")
-				}
-			}()
+			merkleLogger := logger.With().Str("subsystem", "merkle-root-export").Logger()
+			go runMerkleSignedRootExport(rootCtx, merkle, interval, merkleLogger)
 		}
 
 		// Reef A-6: OpenTelemetry exporter.
@@ -314,7 +329,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 			busURL = pol.Reef.PolicyBus.GRPCURL
 		}
 		if busURL == "" {
-			busURL = "localhost:50051"
+			busURL = defaults.DefaultPolicyBusGRPCURL
 		}
 		if pol.Reef.PolicySignerPubKey != "" || os.Getenv("REEF_POLICY_BUS_DISABLE") == "" {
 			signerPubKey := pol.Reef.PolicySignerPubKey
@@ -331,10 +346,10 @@ func runServe(cmd *cobra.Command, args []string) error {
 					logger.Warn().Err(vErr).Msg("policy bus client disabled — verifier construction failed")
 				} else {
 					identity := policysync.NodeIdentity{
-						FleetID:     envOrDefault("REEF_FLEET_ID", "demo-fleet"),
-						RegionID:    envOrDefault("REEF_REGION_ID", "demo-region"),
-						SiteID:      envOrDefault("REEF_SITE_ID", "demo-site"),
-						NodeID:      envOrDefault("REEF_NODE_ID", "node-1"),
+						FleetID:     envOrDefault("REEF_FLEET_ID", defaults.DefaultFleetID),
+						RegionID:    envOrDefault("REEF_REGION_ID", defaults.DefaultRegionID),
+						SiteID:      envOrDefault("REEF_SITE_ID", defaults.DefaultSiteID),
+						NodeID:      envOrDefault("REEF_NODE_ID", defaults.DefaultNodeID),
 						SVIDSubject: os.Getenv("REEF_SVID_SUBJECT"),
 					}
 					policyApplier := newPolicyApplier(pol, &reefLoggerAdapter{logger: logger.With().Str("subsystem", "policy-apply").Logger()})
@@ -352,9 +367,14 @@ func runServe(cmd *cobra.Command, args []string) error {
 					if cErr != nil {
 						logger.Warn().Err(cErr).Msg("policy bus client construction failed — proceeding without hot reload")
 					} else {
+						// Refinement R-B4: bus client respects rootCtx so a
+						// shutdown signal terminates the long-lived stream.
+						busLogger := logger.With().Str("subsystem", "policysync").Logger()
 						go func() {
-							if rerr := busClient.Run(context.Background()); rerr != nil && rerr != context.Canceled {
-								logger.Warn().Err(rerr).Msg("policy bus client exited")
+							if rerr := busClient.Run(rootCtx); rerr != nil && !errors.Is(rerr, context.Canceled) {
+								busLogger.Warn().Err(rerr).Msg("policy bus client exited")
+							} else {
+								busLogger.Info().Msg("policy bus client shutting down on context cancel")
 							}
 						}()
 						logger.Info().
@@ -394,7 +414,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	if !noDashboard {
 		hub := dashboard.NewHub(pol)
 		pipe.AddObserver(hub.OnEvent)
-		dashboard.Run(context.Background(), hub)
+		dashboard.Run(rootCtx, hub)
 
 		dashHandler := dashboard.Handler(hub)
 		handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -424,5 +444,105 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Fprintln(os.Stderr)
 
-	return http.ListenAndServe(listenAddr, handler)
+	// Refinement R-B1 (Phase B): replace bare http.ListenAndServe with a
+	// fully-configured http.Server. ReadHeaderTimeout closes the Slowloris
+	// header-feed attack window; ReadTimeout / WriteTimeout / IdleTimeout
+	// bound the per-connection lifetime so a stalled client can't tie up the
+	// listener indefinitely.
+	srv := &http.Server{
+		Addr:              listenAddr,
+		Handler:           handler,
+		ReadHeaderTimeout: defaults.HTTPReadHeaderTimeout,
+		ReadTimeout:       defaults.HTTPReadTimeout,
+		WriteTimeout:      defaults.HTTPWriteTimeout,
+		IdleTimeout:       defaults.HTTPIdleTimeout,
+	}
+
+	// Run ListenAndServe in a goroutine so the main goroutine can block on
+	// signal delivery; any non-graceful listener exit is surfaced via errCh.
+	errCh := make(chan error, 1)
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			errCh <- err
+			return
+		}
+		close(errCh)
+	}()
+
+	// Block until either the listener errors out OR a shutdown signal
+	// arrives. Graceful shutdown gets GracefulShutdownTimeout to drain
+	// in-flight requests before the listener is forcibly closed.
+	select {
+	case err := <-errCh:
+		stopRootCtx() // notify background goroutines that we're going down
+		if err != nil {
+			return fmt.Errorf("http server: %w", err)
+		}
+		return nil
+	case <-rootCtx.Done():
+		logger.Info().Msg("shutdown signal received — draining in-flight requests")
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), defaults.GracefulShutdownTimeout)
+		defer cancel()
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			logger.Warn().Err(err).Msg("graceful shutdown timed out — forcing close")
+			return fmt.Errorf("graceful shutdown: %w", err)
+		}
+		logger.Info().Msg("graceful shutdown complete")
+		return nil
+	}
+}
+
+// buildSVIDVerifier attempts to construct an SVID JWT verifier from the
+// configured issuer-keys directory. Returns (verifier, true, nil) on success
+// or (nil, false, reason) when the dir is missing/empty/unloadable. Caller
+// decides whether the failure is fatal (R-B3: it IS fatal when
+// policy.reef.require_svid == true).
+func buildSVIDVerifier(dir, audience string) (*identity.JWTVerifier, bool, error) {
+	if dir == "" {
+		return nil, false, errors.New("svid: issuer keys directory not configured")
+	}
+	if _, statErr := os.Stat(dir); statErr != nil {
+		return nil, false, fmt.Errorf("svid: cannot stat issuer keys directory %q: %w", dir, statErr)
+	}
+	v, err := identity.NewJWTVerifier(identity.VerifierConfig{
+		ExpectedAudience: audience,
+		IssuerKeysDir:    dir,
+	})
+	if err != nil {
+		return nil, false, fmt.Errorf("svid: verifier construction failed: %w", err)
+	}
+	if len(v.KeyIDs()) == 0 {
+		return nil, false, fmt.Errorf("svid: no issuer keys loaded from %q", dir)
+	}
+	return v, true, nil
+}
+
+// runMerkleSignedRootExport ticks once per interval and writes the signed
+// root snapshot to the structured logger. Stops cleanly on ctx.Done().
+// Refinement R-B4 (Phase B Round 1 Batch B) replaced the bare
+// `for range ticker.C` loop with this cancellable variant.
+func runMerkleSignedRootExport(ctx context.Context, tree *audit.Tree, interval time.Duration, logger zerolog.Logger) {
+	if interval <= 0 {
+		interval = defaults.MerkleSignedRootInterval
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	logger.Info().Dur("interval", interval).Msg("merkle signed-root export started")
+	for {
+		select {
+		case <-ctx.Done():
+			logger.Info().Msg("merkle-signed-root-export shutting down")
+			return
+		case <-ticker.C:
+			root, sig, count, _ := tree.SignedRoot()
+			if root == "" {
+				continue
+			}
+			logger.Info().
+				Str("root", root).
+				Str("signature", sig).
+				Int("count", count).
+				Msg("merkle signed root export")
+		}
+	}
 }

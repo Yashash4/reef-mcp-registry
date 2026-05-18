@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Yashash4/reef-mcp-registry/lobstertrap-reef/internal/audit"
+	"github.com/Yashash4/reef-mcp-registry/lobstertrap-reef/internal/defaults"
 	"github.com/Yashash4/reef-mcp-registry/lobstertrap-reef/internal/engine/actions"
 	"github.com/Yashash4/reef-mcp-registry/lobstertrap-reef/internal/inspector"
 	"github.com/Yashash4/reef-mcp-registry/lobstertrap-reef/internal/metadata"
@@ -204,8 +205,14 @@ func (p *Pipeline) Dispatcher() *actions.Dispatcher {
 
 // ProcessIngress inspects a prompt and evaluates ingress rules.
 // declared may be nil if the agent didn't send _lobstertrap headers.
+//
+// This is the backward-compatible shim that allocates a fresh
+// context.Background() for callers (CLI tools, older tests) that don't have
+// one to hand. New call sites SHOULD use ProcessIngressWithAuth and pass a
+// real ctx so client cancels propagate to MCP verify, OTel spans, and
+// any other downstream RPC.
 func (p *Pipeline) ProcessIngress(promptText string, declared *metadata.RequestHeaders) *PipelineResult {
-	return p.ProcessIngressWithAuth(promptText, declared, "")
+	return p.ProcessIngressWithAuth(context.Background(), promptText, declared, "")
 }
 
 // ProcessIngressWithAuth is the SVID-aware ingress entrypoint. authToken is
@@ -213,13 +220,21 @@ func (p *Pipeline) ProcessIngress(promptText string, declared *metadata.RequestH
 // prefix). When --enable-reef is on and a verifier is attached, the token
 // is verified BEFORE inspector inspection — invalid SVIDs cause an early
 // DENY when the policy's RequireSVID flag is set.
-func (p *Pipeline) ProcessIngressWithAuth(promptText string, declared *metadata.RequestHeaders, authToken string) *PipelineResult {
+//
+// ctx propagates request cancellation, OTel trace context, and HTTP server
+// deadlines down to the MCP registry verifier, the OTel span tree, and any
+// future downstream RPC. Pass r.Context() from the HTTP handler; the
+// pipeline never blocks on this context past the request lifetime.
+// Refinement R-B2 (Phase B Round 1 Batch B) threaded this signature.
+func (p *Pipeline) ProcessIngressWithAuth(ctx context.Context, promptText string, declared *metadata.RequestHeaders, authToken string) *PipelineResult {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	reqID := fmt.Sprintf("req-%d", requestCounter.Add(1))
 
 	// OTel span lifecycle. Span attributes are populated as the pipeline
 	// makes decisions; on End the latency is captured below.
 	var span otel.Span
-	ctx := context.Background()
 	startedAt := time.Now()
 	if p.enableReef && p.otelExporter != nil {
 		ctx, span = p.otelExporter.Start(ctx, "reef.pipeline.ingress")
@@ -294,8 +309,11 @@ func (p *Pipeline) ProcessIngressWithAuth(promptText string, declared *metadata.
 		if transport == "" {
 			transport = "http"
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		mcpResp, _ = p.mcpVerifier.Verify(ctx, mcpsupply.VerifyRequest{
+		// Derive a deadline-bounded sub-context from the caller's ctx so a
+		// client cancel still flows through, but the verify call is also
+		// capped at MCPVerifyContextTimeout. Refinement R-B2 (Phase B).
+		verifyCtx, cancel := context.WithTimeout(ctx, defaults.MCPVerifyContextTimeout)
+		mcpResp, _ = p.mcpVerifier.Verify(verifyCtx, mcpsupply.VerifyRequest{
 			MCPName:   meta.MCPBindTarget,
 			Version:   meta.MCPBindVersion,
 			Transport: transport,
@@ -418,7 +436,9 @@ func (p *Pipeline) ProcessIngressWithAuth(promptText string, declared *metadata.
 	// the matched action is one Reef implements. ALLOW / DENY / LOG keep
 	// their upstream paths so vanilla LT behaviour is preserved.
 	if p.enableReef && p.dispatcher != nil && isReefAction(result.Action) {
-		out := p.dispatcher.Dispatch(context.Background(), actions.Decision{
+		// Pass the caller's ctx so a client cancel reaches the webhook POST,
+		// redirect lookup, etc. — refinement R-B2.
+		out := p.dispatcher.Dispatch(ctx, actions.Decision{
 			Direction:  actions.DirectionIngress,
 			RequestID:  reqID,
 			AgentID:    agentID,
@@ -601,30 +621,36 @@ func (p *Pipeline) dispatchRateLimited(reqID string, ctx context.Context, meta *
 
 // appendMerkleLeaf records the verdict into the tamper-evident tree.
 // nil-safe (the tree may not be wired).
+//
+// Body handling: bodies larger than defaults.AuditBodyTruncationBytes are
+// clipped before hashing so the audit JSONL stays bounded. When that
+// happens, the leaf is marked BodyTruncated: true so a downstream verifier
+// can distinguish "body matches verbatim" from "first 4 KiB matched and the
+// rest is unknown" — refinement R-B6 (Phase B Round 1 Batch B).
 func (p *Pipeline) appendMerkleLeaf(reqID, direction string, meta *inspector.PromptMetadata, result policy.RuleResult, body string) {
 	if p.merkleTree == nil {
 		return
 	}
 	bodyHash := ""
+	truncated := false
 	if body != "" {
-		// Only hash bodies up to a sane cap; otherwise we'd bloat audit
-		// payloads. The hash is still tamper-evident for the visible portion.
-		const max = 4096
-		if len(body) > max {
-			body = body[:max]
+		if len(body) > defaults.AuditBodyTruncationBytes {
+			body = body[:defaults.AuditBodyTruncationBytes]
+			truncated = true
 		}
 		sum := sha256.Sum256([]byte(body))
 		bodyHash = hex.EncodeToString(sum[:])
 	}
 	_, _ = p.merkleTree.Append(audit.AuditEvent{
-		Timestamp:   time.Now().UTC(),
-		Direction:   direction,
-		RequestID:   reqID,
-		SVIDSubject: meta.SVIDSubject,
-		RuleID:      result.RuleName,
-		Action:      string(result.Action),
-		DenyMsg:     result.DenyMessage,
-		BodyHash:    bodyHash,
+		Timestamp:     time.Now().UTC(),
+		Direction:     direction,
+		RequestID:     reqID,
+		SVIDSubject:   meta.SVIDSubject,
+		RuleID:        result.RuleName,
+		Action:        string(result.Action),
+		DenyMsg:       result.DenyMessage,
+		BodyHash:      bodyHash,
+		BodyTruncated: truncated,
 		Metadata: map[string]any{
 			"intent_category":         meta.IntentCategory,
 			"risk_score":              meta.RiskScore,
@@ -716,11 +742,19 @@ func isReefAction(a policy.Action) bool {
 
 // ProcessEgress inspects model output and evaluates egress rules.
 // Updates the existing PipelineResult with egress information.
-func (p *Pipeline) ProcessEgress(pr *PipelineResult, responseText string) {
+//
+// ctx propagates HTTP server deadlines + trace context to the dispatcher's
+// MODIFY/REDIRECT/QUARANTINE/HUMAN_REVIEW handlers (webhooks, etc.). Pass
+// the same ctx that fed ProcessIngressWithAuth; pass nil to fall back to
+// context.Background() for backward compatibility. Refinement R-B2.
+func (p *Pipeline) ProcessEgress(ctx context.Context, pr *PipelineResult, responseText string) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	var span otel.Span
 	startedAt := time.Now()
 	if p.enableReef && p.otelExporter != nil {
-		_, span = p.otelExporter.Start(context.Background(), "reef.pipeline.egress")
+		ctx, span = p.otelExporter.Start(ctx, "reef.pipeline.egress")
 		span.SetAttribute("request.id", pr.RequestID)
 		defer func() {
 			span.SetAttribute("latency_ms", time.Since(startedAt).Milliseconds())
@@ -771,7 +805,9 @@ func (p *Pipeline) ProcessEgress(pr *PipelineResult, responseText string) {
 		agentID = pr.DeclaredHeaders.AgentID
 	}
 	if p.enableReef && p.dispatcher != nil && isReefAction(result.Action) {
-		out := p.dispatcher.Dispatch(context.Background(), actions.Decision{
+		// Pass the caller's ctx so the dispatcher (and any webhook POST in
+		// HUMAN_REVIEW) can honour the upstream cancellation — R-B2.
+		out := p.dispatcher.Dispatch(ctx, actions.Decision{
 			Direction:  actions.DirectionEgress,
 			RequestID:  pr.RequestID,
 			AgentID:    agentID,
@@ -851,9 +887,17 @@ func (p *Pipeline) AddObserver(fn EventObserver) {
 }
 
 // notify sends an event to all registered observers.
+//
+// Concurrency note (POV-1 race-flag fix, Phase B Round 1 Batch B):
+// `observers := p.observers` would alias the underlying slice header — a
+// concurrent AddObserver could append in place if capacity allowed, and the
+// notify reader would race on the cap field even though the lock was
+// released. Use copy() into a freshly-allocated slice so the snapshot is
+// fully detached from the writer's backing array.
 func (p *Pipeline) notify(event PipelineEvent) {
 	p.observerMu.RLock()
-	observers := p.observers
+	observers := make([]EventObserver, len(p.observers))
+	copy(observers, p.observers)
 	p.observerMu.RUnlock()
 
 	for _, fn := range observers {

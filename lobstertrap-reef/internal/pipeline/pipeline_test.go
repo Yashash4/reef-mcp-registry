@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"context"
 	"testing"
 
 	"github.com/Yashash4/reef-mcp-registry/lobstertrap-reef/internal/audit"
@@ -63,7 +64,7 @@ func TestPipeline_Egress_CredentialLeak(t *testing.T) {
 	result := pipe.ProcessIngress("Tell me about API keys", nil)
 
 	// Simulate model output containing credentials
-	pipe.ProcessEgress(result, "Here is your API key: sk-1234567890abcdefghijklmnopqrstuv")
+	pipe.ProcessEgress(context.Background(), result, "Here is your API key: sk-1234567890abcdefghijklmnopqrstuv")
 
 	if !result.Blocked {
 		t.Error("expected egress credential leak to be blocked")
@@ -80,7 +81,7 @@ func TestPipeline_Egress_PIILeak(t *testing.T) {
 	result := pipe.ProcessIngress("What is a social security number?", nil)
 
 	// Simulate model output containing PII
-	pipe.ProcessEgress(result, "A SSN looks like this: 123-45-6789")
+	pipe.ProcessEgress(context.Background(), result, "A SSN looks like this: 123-45-6789")
 
 	if !result.Blocked {
 		t.Error("expected egress PII leak to be blocked")
@@ -92,7 +93,7 @@ func TestPipeline_Egress_Clean(t *testing.T) {
 	pipe := New(pol, audit.NopLogger())
 
 	result := pipe.ProcessIngress("What is the capital of France?", nil)
-	pipe.ProcessEgress(result, "The capital of France is Paris.")
+	pipe.ProcessEgress(context.Background(), result, "The capital of France is Paris.")
 
 	if result.Blocked {
 		t.Error("expected clean response to pass egress")
@@ -149,7 +150,7 @@ func TestPipeline_BuildResponseHeaders_Allow(t *testing.T) {
 	pipe := New(pol, audit.NopLogger())
 
 	result := pipe.ProcessIngress("Hello, how are you?", nil)
-	pipe.ProcessEgress(result, "I'm doing well, thanks!")
+	pipe.ProcessEgress(context.Background(), result, "I'm doing well, thanks!")
 
 	rh := result.BuildResponseHeaders()
 	if rh.Verdict != "ALLOW" {

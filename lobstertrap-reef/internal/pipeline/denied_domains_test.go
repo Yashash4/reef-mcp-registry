@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -90,7 +91,7 @@ func TestProcessEgress_DeniedDomains_EchoLeakMarkdownImage(t *testing.T) {
 				t.Fatalf("unexpected ingress block: %s", pr.DenyMessage)
 			}
 
-			pipe.ProcessEgress(pr, tc.response)
+			pipe.ProcessEgress(context.Background(), pr, tc.response)
 
 			if pr.Blocked != tc.wantBlocked {
 				t.Fatalf("Blocked = %v, want %v (egress action %s, rule %q)",
@@ -141,7 +142,7 @@ func TestProcessEgress_DeniedDomains_DoesNotOverrideExplicitDeny(t *testing.T) {
 	pipe := New(pol, audit.NopLogger())
 	pr := pipe.ProcessIngress("ok", nil)
 	// Response triggers BOTH the credential-leak rule AND a denied-domain reference.
-	pipe.ProcessEgress(pr, "Here is your token: sk-AAAABBBBCCCCDDDDEEEEFFFFGGGGHHHH and visit https://attacker.example.com/log")
+	pipe.ProcessEgress(context.Background(), pr, "Here is your token: sk-AAAABBBBCCCCDDDDEEEEFFFFGGGGHHHH and visit https://attacker.example.com/log")
 
 	if !pr.Blocked {
 		t.Fatal("expected egress block")

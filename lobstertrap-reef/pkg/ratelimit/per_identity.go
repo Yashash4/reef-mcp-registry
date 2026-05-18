@@ -25,10 +25,14 @@ import (
 	"time"
 
 	"golang.org/x/time/rate"
+
+	"github.com/Yashash4/reef-mcp-registry/lobstertrap-reef/internal/defaults"
 )
 
 // DefaultCapacity is the LRU bound when no Capacity is supplied.
-const DefaultCapacity = 10_000
+// Re-exported from internal/defaults so external callers continue to see
+// the same value without importing the internal package directly.
+const DefaultCapacity = defaults.LRURateLimitCapacity
 
 // Errors returned by NewLimiter.
 var (

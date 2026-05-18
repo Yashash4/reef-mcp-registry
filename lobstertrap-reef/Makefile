@@ -1,4 +1,4 @@
-.PHONY: build build-static test bench clean install
+.PHONY: build build-static test test-race vet bench clean install
 
 BINARY := lobstertrap
 VERSION := 0.1.0
@@ -12,6 +12,16 @@ build-static:
 
 test:
 	go test ./... -v
+
+# Refinement R-B7 (Phase B Round 1 Batch B): run the full race detector
+# across every package. Requires gcc (install via `apt install build-essential`
+# on Debian/Ubuntu / `brew install gcc` on macOS). Output is tee'd into
+# race-test.log; RACE_TEST.md captures the canonical green run.
+test-race:
+	CGO_ENABLED=1 go test -race -count=1 ./... 2>&1 | tee race-test.log
+
+vet:
+	go vet ./...
 
 bench:
 	go test ./internal/inspector/ -bench=. -benchmem

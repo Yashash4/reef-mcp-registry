@@ -76,10 +76,11 @@ func (gp *GuardProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Extract prompt text and run ingress DPI with declared headers + SVID
-	// (when present).
+	// (when present). Propagate r.Context() so a client cancel reaches the
+	// MCP registry verify call + dispatcher webhooks (refinement R-B2).
 	promptText := ExtractPromptText(chatReq)
 	authToken := r.Header.Get("Authorization")
-	result := gp.pipe.ProcessIngressWithAuth(promptText, chatReq.LobsterTrap, authToken)
+	result := gp.pipe.ProcessIngressWithAuth(r.Context(), promptText, chatReq.LobsterTrap, authToken)
 
 	gp.logger.Info().
 		Str("request_id", result.RequestID).
@@ -206,7 +207,7 @@ func (gp *GuardProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	chatResp, err := ParseChatResponse(respBody)
 	if err == nil && len(chatResp.Choices) > 0 {
 		responseText := ExtractResponseText(chatResp)
-		gp.pipe.ProcessEgress(result, responseText)
+		gp.pipe.ProcessEgress(r.Context(), result, responseText)
 
 		// Reef egress action shaping (A-4). MODIFY rewrites the response
 		// body in-place so the forwarded chat-completion choice carries

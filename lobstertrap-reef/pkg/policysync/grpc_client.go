@@ -36,6 +36,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 
+	"github.com/Yashash4/reef-mcp-registry/lobstertrap-reef/internal/defaults"
 	policybuspb "github.com/Yashash4/reef-mcp-registry/lobstertrap-reef/pkg/policysync/proto"
 )
 
@@ -168,16 +169,16 @@ func NewClient(cfg Config) (*Client, error) {
 		)
 	}
 	if cfg.Endpoint == "" {
-		cfg.Endpoint = "localhost:50051"
+		cfg.Endpoint = defaults.DefaultPolicyBusGRPCURL
 	}
 	if cfg.Logger == nil {
 		cfg.Logger = nopLogger{}
 	}
 	if cfg.InitialBackoff <= 0 {
-		cfg.InitialBackoff = 500 * time.Millisecond
+		cfg.InitialBackoff = defaults.PolicyBusReconnectMin
 	}
 	if cfg.MaxBackoff <= 0 {
-		cfg.MaxBackoff = 30 * time.Second
+		cfg.MaxBackoff = defaults.PolicyBusReconnectMax
 	}
 	c := &Client{cfg: cfg}
 	c.currentVersion.Store("")

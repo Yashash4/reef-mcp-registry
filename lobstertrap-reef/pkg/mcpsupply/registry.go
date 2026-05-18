@@ -24,6 +24,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/Yashash4/reef-mcp-registry/lobstertrap-reef/internal/defaults"
 )
 
 // Decision values mirror the JSON returned by Atlas /verify.
@@ -93,7 +95,7 @@ type HTTPVerifier struct {
 // (default http://localhost:8080).
 func NewHTTPVerifier(endpoint string, timeout time.Duration) Verifier {
 	if timeout <= 0 {
-		timeout = 1500 * time.Millisecond
+		timeout = defaults.MCPRegistryRequestTimeout
 	}
 	return &HTTPVerifier{
 		endpoint: strings.TrimRight(endpoint, "/"),
