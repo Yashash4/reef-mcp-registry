@@ -113,3 +113,6 @@ scratch/
 
 # Remotion video pipeline — local-only build tooling, not part of public repo
 remotion/
+
+# Playwright MCP browser tooling output (local)
+.playwright-mcp/
