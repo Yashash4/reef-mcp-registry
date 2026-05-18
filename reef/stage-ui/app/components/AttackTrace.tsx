@@ -98,7 +98,8 @@ export function AttackTrace({
   // Fetch real screenshots when a sessionId is provided. We surface fetch
   // errors visibly so the panel never silently masks an outage.
   useEffect(() => {
-    if (!sessionId) {
+    if (!sessionId || !baseUrl) {
+      // No session OR no backend wired (demo mode) — show placeholder story.
       setFrames(synthesizePlaceholderFrames(sessionId));
       setActiveIndex(0);
       setClassifierModelId(null);

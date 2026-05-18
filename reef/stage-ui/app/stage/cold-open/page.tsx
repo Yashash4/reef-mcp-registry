@@ -115,12 +115,30 @@ export default function ColdOpenScene() {
               <div className="display text-3xl text-text-2">
                 EchoLeak attempt at the victim Copilot
               </div>
-              <iframe
-                src={`${REEF_VICTIM_URL}?demo=true`}
-                className="w-full h-[60vh] rounded-xl border border-border bg-bg"
-                title="Reef victim — EchoLeak demo path"
-                sandbox="allow-scripts allow-forms allow-same-origin"
-              />
+              {REEF_VICTIM_URL ? (
+                <iframe
+                  src={`${REEF_VICTIM_URL}?demo=true`}
+                  className="w-full h-[60vh] rounded-xl border border-border bg-bg"
+                  title="Reef victim — EchoLeak demo path"
+                  sandbox="allow-scripts allow-forms allow-same-origin"
+                />
+              ) : (
+                <div className="w-full h-[60vh] rounded-xl border border-border bg-bg flex flex-col items-center justify-center gap-4 px-6 text-center">
+                  <div className="text-[11px] uppercase tracking-widest text-amber-300">
+                    Demo mode
+                  </div>
+                  <div className="display text-xl text-text-2">
+                    Victim Copilot-clone runs locally at{" "}
+                    <code className="mono text-amber-300">localhost:3001</code>
+                  </div>
+                  <div className="text-sm text-text-3 max-w-2xl leading-relaxed">
+                    Run <code className="mono text-amber-300">docker compose up</code>{" "}
+                    to see the EchoLeak attack hit the live Copilot, or watch the
+                    recorded demo video linked in the README for the verbatim
+                    MODIFY-blocked sequence.
+                  </div>
+                </div>
+              )}
             </div>
           </SceneBeat>
         )}

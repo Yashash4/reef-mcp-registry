@@ -30,6 +30,11 @@ interface AttackResult {
  *      Show whether the response embeds an exfil URL.
  *   2. Iframe the victim app at localhost:3001 so judges can poke at the
  *      actual Copilot clone in the same scroll.
+ *
+ * When `REEF_VICTIM_URL` is empty (production deploy with no backend),
+ * the iframe is swapped for a styled placeholder and the "Attempt attack"
+ * button plays a canonical pre-canned MODIFY-blocked response so judges
+ * still see the right outcome on the deployed Vercel build.
  */
 export function AttackPlayground({ className }: AttackPlaygroundProps) {
   const [prompt, setPrompt] = useState(
@@ -40,10 +45,31 @@ export function AttackPlayground({ className }: AttackPlaygroundProps) {
   const [result, setResult] = useState<AttackResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // No backend wired in (Vercel production with NEXT_PUBLIC_REEF_DEMO_MODE=true)
+  const hasBackend = Boolean(REEF_VICTIM_URL);
+
   const runAttack = async () => {
     setPending(true);
     setResult(null);
     setError(null);
+
+    // No backend → return the canonical MODIFY-blocked response so the
+    // panel still tells the right story on the deployed Vercel build.
+    if (!hasBackend) {
+      // Tiny artificial delay so the button transition still feels live.
+      await new Promise((r) => setTimeout(r, 600));
+      setResult({
+        blocked: true,
+        reason:
+          "Reef MODIFY action stripped the markdown image to attacker.example.com (egress.markdown_image rule, bundle v3.2.1).",
+        echoed_summary:
+          "Summary: contract notes received. (markdown image removed by Reef egress proxy)",
+        exfil_detected: false,
+      });
+      setPending(false);
+      return;
+    }
+
     try {
       // The victim app exposes /api/summarize for the EchoLeak flow.
       const url = `${REEF_VICTIM_URL}/api/summarize?demo=${demoMode ? "true" : "false"}`;
@@ -87,8 +113,19 @@ export function AttackPlayground({ className }: AttackPlaygroundProps) {
         <p className="mt-1 text-xs text-text-3">
           Two paths: (1) post a poisoned email to the victim app, see if Reef
           intervenes · (2) open the victim Copilot in an iframe for hands-on
-          exploration. Both target the same{" "}
-          <code className="mono">{REEF_VICTIM_URL}</code> instance.
+          exploration.
+          {hasBackend ? (
+            <>
+              {" "}Both target the same{" "}
+              <code className="mono">{REEF_VICTIM_URL}</code> instance.
+            </>
+          ) : (
+            <>
+              {" "}<span className="text-amber-300">Demo mode</span> — the
+              victim Copilot runs locally; the deployed page replays the
+              canonical MODIFY-blocked outcome.
+            </>
+          )}
         </p>
       </CardHeader>
       <CardContent>
@@ -151,7 +188,7 @@ export function AttackPlayground({ className }: AttackPlaygroundProps) {
             )}
             {error && (
               <div className="rounded-md border border-red/30 bg-red-soft p-3 text-xs text-red">
-                {error} — is the victim app running at {REEF_VICTIM_URL}?
+                {error} — demo mode: see the recorded video for the live attack flow.
               </div>
             )}
           </div>
@@ -159,24 +196,43 @@ export function AttackPlayground({ className }: AttackPlaygroundProps) {
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <span className="h-section">Path 2 · Live iframe</span>
-              <a
-                href={`${REEF_VICTIM_URL}?demo=false`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-xs text-emerald hover:underline inline-flex items-center gap-1"
-              >
-                open new tab
-                <ExternalLink className="h-3 w-3" />
-              </a>
+              {hasBackend && (
+                <a
+                  href={`${REEF_VICTIM_URL}?demo=false`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs text-emerald hover:underline inline-flex items-center gap-1"
+                >
+                  open new tab
+                  <ExternalLink className="h-3 w-3" />
+                </a>
+              )}
             </div>
             <div className="aspect-[4/3] rounded-md border border-border overflow-hidden bg-bg">
-              <iframe
-                src={`${REEF_VICTIM_URL}?demo=false`}
-                className="w-full h-full"
-                title="Reef victim Copilot — interactive"
-                loading="lazy"
-                sandbox="allow-scripts allow-forms allow-same-origin"
-              />
+              {hasBackend ? (
+                <iframe
+                  src={`${REEF_VICTIM_URL}?demo=false`}
+                  className="w-full h-full"
+                  title="Reef victim Copilot — interactive"
+                  loading="lazy"
+                  sandbox="allow-scripts allow-forms allow-same-origin"
+                />
+              ) : (
+                <div className="w-full h-full flex flex-col items-center justify-center gap-3 p-6 text-center">
+                  <div className="text-[10px] uppercase tracking-widest text-amber-300">
+                    Demo mode
+                  </div>
+                  <div className="text-sm text-text-2">
+                    Victim Copilot-clone runs locally at{" "}
+                    <code className="mono text-amber-300">localhost:3001</code>.
+                  </div>
+                  <div className="text-[11px] text-text-3 leading-relaxed max-w-xs">
+                    Run <code className="mono text-amber-300">docker compose up</code>{" "}
+                    to see the live attack flow here, or watch the recorded
+                    demo video linked in the README.
+                  </div>
+                </div>
+              )}
             </div>
             <p className="text-[11px] text-text-3">
               The iframe loads the A-2 victim app. With Reef OFF, EchoLeak-shape

@@ -80,9 +80,14 @@ export function GeminiDuo({
   const abortRef = useRef<AbortController | null>(null);
 
   const baseUrl = dastAUrl || REEF_DAST_A_URL;
+  // Force demo mode when no backend URL is configured (Vercel deploy).
+  const effectiveDemoMode = demoMode || !baseUrl;
 
   useEffect(() => {
-    if (demoMode) {
+    // If no backend URL is configured (Vercel demo deploy), force the
+    // pre-canned exchange so a remote visitor never sees a fetch error
+    // pointing at localhost:8083.
+    if (effectiveDemoMode) {
       runDemo(setMessages);
       return undefined;
     }
@@ -112,7 +117,7 @@ export function GeminiDuo({
       ctrl.abort();
       abortRef.current = null;
     };
-  }, [demoMode, baseUrl, episodeId]);
+  }, [effectiveDemoMode, baseUrl, episodeId]);
 
   const proMessages = messages.filter((m) => m.role === "pro");
   const flashMessages = messages.filter((m) => m.role === "flash");
@@ -132,7 +137,7 @@ export function GeminiDuo({
           </p>
         </div>
         <div className="flex flex-col items-end gap-1.5">
-          {demoMode ? (
+          {effectiveDemoMode ? (
             <Badge variant="amber" className="flex items-center gap-1">
               <AlertCircle className="h-3 w-3" />
               DEMO MODE — pre-canned
