@@ -23,7 +23,7 @@ const instrumentSerif = Instrument_Serif({
 });
 
 export const metadata: Metadata = {
-  title: "Reef — Public Safety Page",
+  title: "Reef: Public Safety Page",
   description:
     "The signed supply chain for MCP servers + the only AI firewall that outputs an underwriter-scorable evidence artifact. Live fleet, signed-policy hash, blocked-attack feed.",
 };

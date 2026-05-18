@@ -48,7 +48,7 @@ export function HeroStrip({ className }: HeroStripProps) {
         </p>
 
         <p className="mt-6 max-w-3xl text-base md:text-lg text-text-2 leading-relaxed">
-          They built the signed supply chain for MCP servers — blocked the{" "}
+          They built the signed supply chain for MCP servers, blocked the{" "}
           <span className="text-text">April 2026 Anthropic MCP exploit</span>{" "}
           at handshake, also reproduced the{" "}
           <span className="text-text">Microsoft Copilot zero-click</span>, ship
