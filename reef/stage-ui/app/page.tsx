@@ -32,10 +32,13 @@ export default function PublicSafetyPage() {
 
       <FleetStatusPanel />
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        <MCPRegistryBeat />
-        <RecentDecisionsFeed />
-      </div>
+      {/* MCPRegistryBeat is the PRIMARY HEADLINE — Batch D R-D5 restructured
+       *  it into a one-big-punch layout (60% main + 25% side rail + 15%
+       *  footer). It now takes a full row so the BIND DENIED glyph has the
+       *  visual mass POV-3 #3 asked for. RecentDecisionsFeed sits below. */}
+      <MCPRegistryBeat />
+
+      <RecentDecisionsFeed />
 
       <AttackPackCatalog />
 

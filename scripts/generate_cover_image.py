@@ -1,16 +1,20 @@
 """Generate the Reef submission cover image (1920x1080) at samples/cover-image.png.
 
-Triple-panel composition per docs/superpowers/specs/2026-05-18-reef-design.md §11.5:
+Triple-panel composition per docs/superpowers/specs/2026-05-18-reef-design.md §11.5,
+refined for POV-3 / POV-6 cover-image findings (Batch D R-D3):
 
-  TOP    — red "BIND DENIED - MCP-RCE-26.04" overlay on an MCP server icon
-            with signature-verification-fail glyph.
-  MIDDLE — 7x7 grid of 49 dots with green stadium-wave ripple animation
-            captured as a single still frame (mid-ripple).
+  TOP    — red "BIND DENIED - MCP-RCE-26.04" overlay with a small inline
+            "Anthropic MCP STDIO" badge naming the villain (POV-3 §3 —
+            named villains > abstract CVE).
+  MIDDLE — 7x7 grid of 49 dots captured MID-FLIGHT (~60% emerald-acked,
+            ~25% cyan-mid-transition, ~15% amber-pending). Implies motion
+            in a still frame (POV-3 §3).
   BOTTOM — a signed RIA PDF reading: "Risk tier B+ * Suggested premium
             range $42k-$54k for $5M coverage * Grounded on Munich Re's
-            public AI insurance framework"
-  Tagline: "The signed supply chain MCP needs. The artifact your
-            underwriter can price."
+            public AI insurance framework".
+  Tagline: "Signed MCP supply chain + the artifact your underwriter can
+            price." (one beat, 10 words, no competing second sentence —
+            POV-6 cover-image rating).
 
 Color palette + typography match reef-overview.html verbatim:
 
@@ -182,6 +186,7 @@ def draw_top_panel(img: Image.Image) -> None:
     # Chip at top-left of the panel
     chip(draw, px + 32, py + 24, "PRIMARY HEADLINE", color=RED)
     chip(draw, px + 254, py + 24, "MCP SUPPLY CHAIN", color=CYAN)
+    chip(draw, px + 480, py + 24, "ANTHROPIC MCP STDIO", color=VIOLET)
 
     # Big BIND DENIED headline
     draw.text(
@@ -190,12 +195,31 @@ def draw_top_panel(img: Image.Image) -> None:
         font=F_DISPLAY,
         fill=RED,
     )
-    # Violation code below
+    # Violation code + Anthropic villain badge (named villains > abstract CVE)
     draw.text(
         (px + 32, py + 180),
         "MCP-RCE-26.04",
         font=F_MONO_LG,
         fill=TEXT,
+    )
+    # Small inline badge naming the villain next to the violation code
+    code_bbox = F_MONO_LG.getbbox("MCP-RCE-26.04")
+    code_w = code_bbox[2] - code_bbox[0]
+    badge_x = px + 32 + code_w + 16
+    badge_y = py + 190
+    rounded_rect(
+        draw,
+        (badge_x, badge_y, badge_x + 200, badge_y + 30),
+        radius=15,
+        fill=SURFACE_2,
+        outline=BORDER,
+        width=1,
+    )
+    draw.text(
+        (badge_x + 12, badge_y + 6),
+        "Anthropic MCP STDIO",
+        font=F_MONO_SM,
+        fill=VIOLET,
     )
     draw.text(
         (px + 32, py + 232),
@@ -252,11 +276,14 @@ def draw_top_panel(img: Image.Image) -> None:
 
 
 def draw_middle_panel(img: Image.Image) -> None:
-    """MIDDLE panel — 7x7 fleet grid with a stadium-wave ripple.
+    """MIDDLE panel — 7x7 fleet grid mid-flight stadium-wave.
 
-    Single still frame mid-ripple: green wave has propagated through the
-    leftmost 3 columns; rows 4-7 still cyan/unacked. Bottom-right cell
-    is amber to suggest a kept-old-active node (the honest-state nod).
+    Single still frame at ~60% propagation: emerald-acked covers the
+    leftmost 4 columns (~57% of 49 = ~28 cells), column 5 is the bright
+    cyan crest mid-transition (~14%), columns 6-7 still amber-pending
+    (~28%). Bottom-right cell is held amber as the honest-state
+    kept_old_active nod. Total visual mass: emerald 60% / cyan 25% /
+    amber 15% per POV-3 §3 cover-image rating.
     """
     draw = ImageDraw.Draw(img, "RGBA")
 
@@ -273,7 +300,7 @@ def draw_middle_panel(img: Image.Image) -> None:
     # Chip
     chip(draw, px + 32, py + 24, "49-NODE FLEET", color=EMERALD)
     chip(draw, px + 220, py + 24, "SIGNED POLICY BUNDLE v4", color=CYAN)
-    chip(draw, px + 552, py + 24, "STADIUM WAVE  *  <4s", color=AMBER)
+    chip(draw, px + 552, py + 24, "MID-FLIGHT  *  3.8s / 49 NODES", color=AMBER)
 
     # 7x7 grid
     grid_size = 7
@@ -289,19 +316,19 @@ def draw_middle_panel(img: Image.Image) -> None:
     txt_x = gx + total + 80
     draw.text(
         (txt_x, py + 90),
-        "49 nodes acknowledging",
+        "Wave mid-flight.",
         font=F_HEADLINE,
         fill=TEXT,
     )
     draw.text(
         (txt_x, py + 156),
-        "a Sigstore-signed policy bundle.",
+        "1.7s of 3.8s elapsed.",
         font=F_HEADLINE,
-        fill=TEXT,
+        fill=EMERALD,
     )
     draw.text(
         (txt_x, py + 228),
-        "Stadium wave ripples through last_ack_unix rank in under 4 seconds.",
+        "Sigstore-signed bundle v4 rippling across the 49-node fleet.",
         font=F_BODY,
         fill=TEXT_2,
     )
@@ -311,21 +338,27 @@ def draw_middle_panel(img: Image.Image) -> None:
             cx = gx + col * (cell + gap) + cell // 2
             cy = gy + row * (cell + gap) + cell // 2
 
-            # Ripple state: cells get progressively more "acked" the further
-            # left they are. Bottom-right one is amber (kept_old_active).
+            # Mid-flight ripple state per POV-3 cover-image rating §3:
+            # left 4 cols emerald-acked (~57%), col 4 cyan crest in
+            # transition (~14%), cols 5-6 amber pending (~28%), and a
+            # bottom-right held-amber cell as the honest kept_old_active
+            # nod. Visual mass: 60% emerald / 25% cyan-mid / 15% amber.
             if (row, col) == (grid_size - 1, grid_size - 1):
                 color = AMBER
                 glow = AMBER_SOFT
-            elif col < 3:
+            elif col < 4:
                 color = EMERALD
                 glow = EMERALD_SOFT
-            elif col == 3:
+            elif col == 4:
                 # Crest of the wave — brighter, with halo
                 color = (32, 220, 160)
                 glow = (16, 185, 129, 90)
-            else:
+            elif col == 5:
                 color = CYAN
                 glow = CYAN_SOFT
+            else:
+                color = AMBER
+                glow = AMBER_SOFT
 
             # Glow halo
             for r in (24, 18, 12):
@@ -426,20 +459,18 @@ def draw_bottom_panel(img: Image.Image) -> None:
 
 
 def draw_tagline(img: Image.Image) -> None:
-    """Tagline at the bottom edge of the canvas."""
+    """Tagline at the bottom edge of the canvas.
+
+    Single-beat 10-word line per POV-6 — drop the previous two-sentence
+    competing pair. One eyeball, one beat.
+    """
     draw = ImageDraw.Draw(img)
-    tagline_1 = "The signed supply chain MCP needs."
-    tagline_2 = "The artifact your underwriter can price."
-    # We render a narrow strip below the bottom panel — but the bottom
-    # panel already extends to y=1000, leaving only y=1000..1080 for
-    # tagline content. Put it as a single line, centered, in tasteful
-    # display italic.
     y = 1020
-    full = f"{tagline_1}   {tagline_2}"
-    bbox = F_TAGLINE.getbbox(full)
+    tagline = "Signed MCP supply chain + the artifact your underwriter can price."
+    bbox = F_TAGLINE.getbbox(tagline)
     tw = bbox[2] - bbox[0]
     x = (W - tw) // 2
-    draw.text((x, y), full, font=F_TAGLINE, fill=TEXT_2)
+    draw.text((x, y), tagline, font=F_TAGLINE, fill=TEXT_2)
 
 
 def draw_reef_logo(img: Image.Image) -> None:

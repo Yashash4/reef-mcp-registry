@@ -38,6 +38,15 @@ export function HeroStrip({ className }: HeroStripProps) {
           servers.
         </h1>
 
+        {/* Slack-able category line — Batch D R-D7. Matches the cold-open
+         *  closing card so the public page and the recorded video carry the
+         *  same sticky line. Stays under 30 words, one beat. */}
+        <p className="mt-6 max-w-3xl display text-2xl md:text-3xl text-text-2 leading-snug">
+          Signed MCP. Insurable AI. Open source. Blocked the April{" "}
+          <span className="text-text">Anthropic RCE</span>. Outputs the audit
+          your <span className="text-text">underwriter</span> can price.
+        </p>
+
         <p className="mt-6 max-w-3xl text-base md:text-lg text-text-2 leading-relaxed">
           They built the signed supply chain for MCP servers — blocked the{" "}
           <span className="text-text">April 2026 Anthropic MCP exploit</span>{" "}

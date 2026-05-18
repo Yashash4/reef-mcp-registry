@@ -13,6 +13,8 @@
 
 </div>
 
+**When AI agents shop for tools online, they get scammed.** Reef is the signed catalog of safe tools — plus the audit your insurance company needs to cover an agent fleet. Blocked the April 2026 Anthropic MCP RCE at the handshake. Outputs the artifact your underwriter can actually price.
+
 > *"They built the signed supply chain for MCP servers — blocked the April 2026 Anthropic MCP exploit at handshake, also reproduced the Microsoft Copilot zero-click, ship the only signed AI-BOM your underwriter can score, and contributed the 4 missing actions back to Lobster Trap upstream. Open source. Edge. Insurable."*
 
 ---
@@ -127,51 +129,28 @@ curl -sL -o sample-ria.pdf http://localhost:8082/quote/ria/sample/download
 
 ## Architecture
 
-```
-                       Reef Control Plane (Python)
-                       +-------------------------------------------+
-                       |  Atlas        Forge       Quote           |
-                       |  (Discover)   (Build*)    (Score)         |
-                       |     |            |          |             |
-                       |     v            v          v             |
-                       |  +-------+   +--------+ +-------------+   |
-                       |  | MCP   |   | Plain  | | Gemini Pro  |   |
-                       |  | sig   |   | EN ->  | | underwriter |   |
-                       |  | reg   |   | YAML   | | Munich Re   |   |
-                       |  +-------+   +--------+ +-------------+   |
-                       |     |            |          |             |
-                       |     |     +------v-----+    |             |
-                       |     |     | DAST-A     |    |             |
-                       |     |     | PPO RL +   |    |             |
-                       |     |     | Gemini Pro |    |             |
-                       |     |     | red-team + |    |             |
-                       |     |     | Flash blue |    |             |
-                       |     +-----+ team       +----+             |
-                       |           +------+-----+                  |
-                       |                  |                        |
-                       |          gRPC policy bus                  |
-                       |  (Sigstore-signed bundles, 49-node fleet) |
-                       +------------------+------------------------+
-                                          |
-                                          v
-                              +-----------+-----------+
-                              | Lobster Trap + Reef   |
-                              | (Go DPI proxy, edge)  |
-                              |                       |
-                              | * 4 actions:          |
-                              |   MODIFY, REDIRECT,   |
-                              |   QUARANTINE,         |
-                              |   HUMAN_REVIEW        |
-                              | * SVID JWT identity   |
-                              | * Sigstore-cosign     |
-                              |   policy bundles      |
-                              | * Merkle audit        |
-                              | * EWMA ASI tracker    |
-                              | * MCP pre-ingress     |
-                              |   signature verify    |
-                              +-----+-------+---------+
-                                    |       |
-                       upstream LLM v       v end-user / agent
+![Reef Architecture — Discover / Build / Run / Score + continuous DAST-A adversary](./samples/architecture-diagram.png)
+
+Reef is one product with four pillars (**Discover → Build → Run → Score**) plus the **DAST-A** adversarial backbone running continuously underneath. The flow: **Reef Atlas** ships a signed AI-BOM and an MCP signature registry → **Reef Forge** compiles plain-English to signed YAML policy bundles → **Lobster Trap + Reef** enforces those bundles at the edge with merkle-audited DPI inspection → **Reef Quote** reads the AI-BOM + audit + coverage map and produces the signed Reef Insurance Artifact. DAST-A runs the PPO adversary forever and feeds Forge (Gemini-Flash blue-team policy drafts) and Quote (30-day attack heatmap).
+
+The diagram above is the source of truth. A text-based equivalent (for screen readers and `grep`) follows:
+
+```mermaid
+flowchart LR
+  subgraph CP["Reef Control Plane (Python)"]
+    Atlas["Reef Atlas<br/>Discover<br/>MCP sig registry + AI-BOM"]
+    Forge["Reef Forge<br/>Build<br/>plain-EN -> signed YAML"]
+    Quote["Reef Quote<br/>Score<br/>Gemini 3 Pro underwriter<br/>Munich Re-grounded"]
+    DASTA["DAST-A<br/>continuous PPO + Gemini Flash"]
+  end
+  LT["Lobster Trap + Reef (Go DPI, edge)<br/>4 actions + SVID JWT + Sigstore + Merkle"]
+  RIA["Reef Insurance Artifact (signed PDF)"]
+  Atlas -- signed AI-BOM --> Forge
+  Forge -- signed policy bundle --> LT
+  LT -- merkle audit + AI-BOM --> Quote
+  Quote -- ed25519-signed --> RIA
+  DASTA -- policy drafts --> Forge
+  DASTA -- 30-day heatmap --> Quote
 ```
 
 \* *Forge is the operator-facing workflow (plain-English → signed YAML policy compiler with shadow-test harness). The same engine builds RIAs.*

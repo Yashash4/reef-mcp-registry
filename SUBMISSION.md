@@ -34,7 +34,7 @@ the same source of truth.
 
 ## Cover image
 
-[`samples/cover-image.png`](./samples/cover-image.png) (1920 × 1080 PNG, triple-panel composition: MCP BIND DENIED + 7×7 fleet stadium wave + signed RIA PDF + tagline).
+[`samples/cover-image.png`](./samples/cover-image.png) (1920 × 1080 PNG, triple-panel composition: MCP BIND DENIED with the Anthropic MCP STDIO villain badge + 7×7 fleet stadium wave captured mid-flight + signed RIA PDF + single-beat tagline "Signed MCP supply chain + the artifact your underwriter can price.").
 
 ## Video presentation
 
