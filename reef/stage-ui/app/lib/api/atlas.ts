@@ -5,9 +5,21 @@
  *   GET  /healthz           — verified / quarantined / poisoned counts
  *   GET  /registry/entries  — full list (used by /stage/discover AI-BOM panel)
  *   POST /verify            — used by MCPRegistryBeat for the live block beat
+ *
+ * Every call routes through `fetchWithMock` so a deployed-but-no-backend
+ * environment (e.g., the Vercel public preview) still tells the right
+ * story with realistic shapes. The mock fixtures live in
+ * `app/lib/mocks/fixtures.ts` and mirror the production pydantic models.
  */
 
 import { REEF_ATLAS_URL } from "@/app/lib/env";
+import { fetchWithMock } from "@/app/lib/fetchWithMock";
+import {
+  MOCK_ATLAS_ENTRIES,
+  MOCK_ATLAS_HEALTH,
+  MOCK_ATLAS_VERIFY_ALLOW,
+  MOCK_ATLAS_VERIFY_DENY,
+} from "@/app/lib/mocks/fixtures";
 import type {
   AtlasEntriesList,
   AtlasHealthz,
@@ -16,32 +28,22 @@ import type {
 
 const DEFAULT_TIMEOUT_MS = 4000;
 
-async function fetchJSON<T>(
-  url: string,
-  init?: RequestInit & { timeoutMs?: number }
-): Promise<T> {
-  const ctl = new AbortController();
-  const t = setTimeout(
-    () => ctl.abort(),
-    init?.timeoutMs ?? DEFAULT_TIMEOUT_MS
-  );
-  try {
-    const res = await fetch(url, { ...init, signal: ctl.signal });
-    if (!res.ok) {
-      throw new Error(`HTTP ${res.status} ${res.statusText} on ${url}`);
-    }
-    return (await res.json()) as T;
-  } finally {
-    clearTimeout(t);
-  }
-}
-
 export async function fetchAtlasHealth(): Promise<AtlasHealthz> {
-  return fetchJSON<AtlasHealthz>(`${REEF_ATLAS_URL}/healthz`);
+  const { data } = await fetchWithMock<AtlasHealthz>(
+    `${REEF_ATLAS_URL}/healthz`,
+    MOCK_ATLAS_HEALTH,
+    { timeoutMs: DEFAULT_TIMEOUT_MS }
+  );
+  return data;
 }
 
 export async function fetchAtlasEntries(): Promise<AtlasEntriesList> {
-  return fetchJSON<AtlasEntriesList>(`${REEF_ATLAS_URL}/registry/entries`);
+  const { data } = await fetchWithMock<AtlasEntriesList>(
+    `${REEF_ATLAS_URL}/registry/entries`,
+    MOCK_ATLAS_ENTRIES,
+    { timeoutMs: DEFAULT_TIMEOUT_MS }
+  );
+  return data;
 }
 
 export interface AtlasVerifyRequest {
@@ -58,9 +60,22 @@ export interface AtlasVerifyRequest {
 export async function verifyAtlas(
   req: AtlasVerifyRequest
 ): Promise<AtlasVerifyResponse> {
-  return fetchJSON<AtlasVerifyResponse>(`${REEF_ATLAS_URL}/verify`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(req),
-  });
+  // The MCPRegistryBeat scene fires verify against a poisoned MCP name to
+  // show the BIND DENIED beat — pick the right mock based on the input so
+  // the demo flow lights up correctly even with no backend.
+  const mock =
+    req.mcpName.includes("attacker") || req.mcpName.includes("evil")
+      ? MOCK_ATLAS_VERIFY_DENY
+      : MOCK_ATLAS_VERIFY_ALLOW;
+  const { data } = await fetchWithMock<AtlasVerifyResponse>(
+    `${REEF_ATLAS_URL}/verify`,
+    mock,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(req),
+      timeoutMs: DEFAULT_TIMEOUT_MS,
+    }
+  );
+  return data;
 }

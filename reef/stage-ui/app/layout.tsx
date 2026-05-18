@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Inter, JetBrains_Mono, Instrument_Serif } from "next/font/google";
 import "./globals.css";
 import { QueryProvider } from "@/app/lib/providers/query-provider";
+import { DemoModeBanner } from "@/app/components/DemoModeBanner";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -38,7 +39,10 @@ export default function RootLayout({
       className={`${inter.variable} ${jetbrainsMono.variable} ${instrumentSerif.variable}`}
     >
       <body className="bg-bg text-text min-h-screen antialiased">
-        <QueryProvider>{children}</QueryProvider>
+        <QueryProvider>
+          <DemoModeBanner />
+          {children}
+        </QueryProvider>
       </body>
     </html>
   );

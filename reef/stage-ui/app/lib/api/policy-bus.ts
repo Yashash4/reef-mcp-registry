@@ -6,6 +6,10 @@
  *   GET /fleet?fleet_id=...   — 49 nodes for the FleetGrid stadium-wave
  *   GET /bundles              — signed bundle metadata (no raw bytes)
  *   GET /audit/tail?n=...     — recent audit-log events (REQUIRES admin token)
+ *
+ * Every call routes through `fetchWithMock` so a no-backend deploy still
+ * renders the 49-dot fleet, the bundle list, and the recent-decisions feed
+ * with realistic shapes. Mocks live in `app/lib/mocks/fixtures.ts`.
  */
 
 import {
@@ -13,6 +17,13 @@ import {
   REEF_POLICY_BUS_ADMIN_TOKEN,
   REEF_POLICY_BUS_ADMIN_URL,
 } from "@/app/lib/env";
+import { fetchWithMock } from "@/app/lib/fetchWithMock";
+import {
+  MOCK_AUDIT_EVENTS,
+  MOCK_BUNDLES,
+  MOCK_FLEET_SNAPSHOT,
+  MOCK_POLICY_BUS_HEALTH,
+} from "@/app/lib/mocks/fixtures";
 import type {
   AuditEvent,
   BundleListItem,
@@ -22,30 +33,13 @@ import type {
 
 const DEFAULT_TIMEOUT_MS = 4000;
 
-async function fetchJSON<T>(
-  url: string,
-  init?: RequestInit & { timeoutMs?: number }
-): Promise<T> {
-  const ctl = new AbortController();
-  const t = setTimeout(
-    () => ctl.abort(),
-    init?.timeoutMs ?? DEFAULT_TIMEOUT_MS
-  );
-  try {
-    const res = await fetch(url, { ...init, signal: ctl.signal });
-    if (!res.ok) {
-      throw new Error(`HTTP ${res.status} ${res.statusText} on ${url}`);
-    }
-    return (await res.json()) as T;
-  } finally {
-    clearTimeout(t);
-  }
-}
-
 export async function fetchPolicyBusHealth(): Promise<PolicyBusHealthz> {
-  return fetchJSON<PolicyBusHealthz>(
-    `${REEF_POLICY_BUS_ADMIN_URL}/healthz`
+  const { data } = await fetchWithMock<PolicyBusHealthz>(
+    `${REEF_POLICY_BUS_ADMIN_URL}/healthz`,
+    MOCK_POLICY_BUS_HEALTH,
+    { timeoutMs: DEFAULT_TIMEOUT_MS }
   );
+  return data;
 }
 
 export async function fetchFleet(
@@ -54,30 +48,44 @@ export async function fetchFleet(
   const url = `${REEF_POLICY_BUS_ADMIN_URL}/fleet?fleet_id=${encodeURIComponent(
     fleetId
   )}`;
-  return fetchJSON<FleetSnapshot>(url);
+  const { data } = await fetchWithMock<FleetSnapshot>(
+    url,
+    MOCK_FLEET_SNAPSHOT,
+    { timeoutMs: DEFAULT_TIMEOUT_MS }
+  );
+  return data;
 }
 
 export async function fetchBundles(): Promise<BundleListItem[]> {
-  return fetchJSON<BundleListItem[]>(
-    `${REEF_POLICY_BUS_ADMIN_URL}/bundles`
+  const { data } = await fetchWithMock<BundleListItem[]>(
+    `${REEF_POLICY_BUS_ADMIN_URL}/bundles`,
+    MOCK_BUNDLES,
+    { timeoutMs: DEFAULT_TIMEOUT_MS }
   );
+  return data;
 }
 
 /**
- * /audit/tail requires `X-Admin-Token`. Without one we throw a typed
- * "admin token missing" error so the hook can surface a 'service offline'
- * badge gracefully — no silent empty array.
+ * /audit/tail requires `X-Admin-Token`. In a no-backend deploy or when
+ * the token is missing we fall back to the canned audit-event stream so
+ * the recent-decisions feed shows MODIFY / QUARANTINE / HUMAN_REVIEW
+ * receipts rather than an empty list. Live mode still requires the token
+ * (we send it when set) — server-side enforcement is unchanged.
  */
 export async function fetchAuditTail(n: number = 20): Promise<AuditEvent[]> {
-  if (!REEF_POLICY_BUS_ADMIN_TOKEN) {
-    throw new Error(
-      "Policy bus admin token missing — set NEXT_PUBLIC_REEF_POLICY_BUS_ADMIN_TOKEN in .env.local to enable the audit feed."
-    );
-  }
-  return fetchJSON<AuditEvent[]>(
-    `${REEF_POLICY_BUS_ADMIN_URL}/audit/tail?n=${n}`,
+  const url = `${REEF_POLICY_BUS_ADMIN_URL}/audit/tail?n=${n}`;
+  // Missing admin token would 401 on the real backend — short-circuit to
+  // the mocked tail so the recent-decisions feed still renders.
+  const { data } = await fetchWithMock<AuditEvent[]>(
+    url,
+    MOCK_AUDIT_EVENTS.slice(0, n),
     {
-      headers: { "X-Admin-Token": REEF_POLICY_BUS_ADMIN_TOKEN },
+      headers: REEF_POLICY_BUS_ADMIN_TOKEN
+        ? { "X-Admin-Token": REEF_POLICY_BUS_ADMIN_TOKEN }
+        : undefined,
+      forceMock: !REEF_POLICY_BUS_ADMIN_TOKEN,
+      timeoutMs: DEFAULT_TIMEOUT_MS,
     }
   );
+  return data;
 }

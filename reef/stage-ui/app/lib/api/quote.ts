@@ -7,9 +7,16 @@
  *   POST /quote/ria/generate              — full live RIA gen (needs Gemini key)
  *   GET  /quote/ria/{ria_id}/download     — generated PDF
  *   GET  /quote/ria/{ria_id}/verify       — re-verify a generated artifact
+ *
+ * In demo / no-backend mode the sample PDF still ships — see
+ * `RIA_SAMPLE_DOWNLOAD_URL` below. We serve a copy from `/public/samples/`
+ * so the deployed Vercel build can still hand judges a downloadable
+ * signed-RIA artifact.
  */
 
 import { REEF_QUOTE_URL } from "@/app/lib/env";
+import { fetchWithMock } from "@/app/lib/fetchWithMock";
+import { MOCK_RIA_GENERATE, MOCK_RIA_VERIFY } from "@/app/lib/mocks/fixtures";
 import type {
   RIAGenerateResponse,
   RIAScoreSummary,
@@ -18,32 +25,23 @@ import type {
 
 const DEFAULT_TIMEOUT_MS = 8000;
 
-async function fetchJSON<T>(
-  url: string,
-  init?: RequestInit & { timeoutMs?: number }
-): Promise<T> {
-  const ctl = new AbortController();
-  const t = setTimeout(
-    () => ctl.abort(),
-    init?.timeoutMs ?? DEFAULT_TIMEOUT_MS
-  );
-  try {
-    const res = await fetch(url, { ...init, signal: ctl.signal });
-    if (!res.ok) {
-      throw new Error(`HTTP ${res.status} ${res.statusText} on ${url}`);
-    }
-    return (await res.json()) as T;
-  } finally {
-    clearTimeout(t);
-  }
-}
-
-export const RIA_SAMPLE_DOWNLOAD_URL = `${REEF_QUOTE_URL}/quote/ria/sample/download`;
+/** Public download URL for the sample RIA. When the Quote service is up we
+ *  point at its `/quote/ria/sample/download` endpoint; when it isn't, we
+ *  fall back to the static copy under `/public/samples/sample-ria.pdf`
+ *  so judges always get a working download link. */
+export const RIA_SAMPLE_DOWNLOAD_URL =
+  process.env.NEXT_PUBLIC_REEF_DEMO_MODE === "true" ||
+  !/^https?:\/\//i.test(REEF_QUOTE_URL)
+    ? "/samples/sample-ria.pdf"
+    : `${REEF_QUOTE_URL}/quote/ria/sample/download`;
 
 export async function fetchRIASampleVerify(): Promise<RIAVerifyResponse> {
-  return fetchJSON<RIAVerifyResponse>(
-    `${REEF_QUOTE_URL}/quote/ria/sample/verify`
+  const { data } = await fetchWithMock<RIAVerifyResponse>(
+    `${REEF_QUOTE_URL}/quote/ria/sample/verify`,
+    MOCK_RIA_VERIFY,
+    { timeoutMs: DEFAULT_TIMEOUT_MS }
   );
+  return data;
 }
 
 export interface RIAGenerateRequest {
@@ -57,8 +55,9 @@ export interface RIAGenerateRequest {
 export async function generateRIA(
   req: RIAGenerateRequest = {}
 ): Promise<RIAGenerateResponse> {
-  return fetchJSON<RIAGenerateResponse>(
+  const { data } = await fetchWithMock<RIAGenerateResponse>(
     `${REEF_QUOTE_URL}/quote/ria/generate`,
+    MOCK_RIA_GENERATE,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -70,6 +69,7 @@ export async function generateRIA(
       timeoutMs: 30_000,
     }
   );
+  return data;
 }
 
 /**

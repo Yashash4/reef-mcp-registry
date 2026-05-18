@@ -6,51 +6,44 @@
  *   GET  /dast-a/review-queue  — policy drafts pending review
  *   POST /dast-a/run           — kick off N episodes (used by Shark playground)
  *
- * Live red-team / blue-team SSE wired in:
- *   POST /dast-a/red-team/gemini-run
- *   POST /dast-a/blue-team/observe
+ * Every call routes through `fetchWithMock` so a no-backend deploy still
+ * surfaces the 4 canonical seed packs (MCP-RCE / EchoLeak / MarkdownExfil
+ * / ToolChain-Drift) and a representative pending draft.
  */
 
 import { REEF_DAST_A_URL } from "@/app/lib/env";
+import { fetchWithMock } from "@/app/lib/fetchWithMock";
+import {
+  MOCK_DAST_A_PACKS,
+  MOCK_DAST_A_REVIEW_QUEUE,
+} from "@/app/lib/mocks/fixtures";
 import type { AttackPackList, PolicyDraft } from "@/app/lib/types";
 
 const DEFAULT_TIMEOUT_MS = 6000;
-
-async function fetchJSON<T>(
-  url: string,
-  init?: RequestInit & { timeoutMs?: number }
-): Promise<T> {
-  const ctl = new AbortController();
-  const t = setTimeout(
-    () => ctl.abort(),
-    init?.timeoutMs ?? DEFAULT_TIMEOUT_MS
-  );
-  try {
-    const res = await fetch(url, { ...init, signal: ctl.signal });
-    if (!res.ok) {
-      throw new Error(`HTTP ${res.status} ${res.statusText} on ${url}`);
-    }
-    return (await res.json()) as T;
-  } finally {
-    clearTimeout(t);
-  }
-}
 
 export async function fetchDastAPacks(
   page: number = 1,
   pageSize: number = 50
 ): Promise<AttackPackList> {
   const url = `${REEF_DAST_A_URL}/dast-a/packs?page=${page}&page_size=${pageSize}`;
-  return fetchJSON<AttackPackList>(url);
+  const { data } = await fetchWithMock<AttackPackList>(url, MOCK_DAST_A_PACKS, {
+    timeoutMs: DEFAULT_TIMEOUT_MS,
+  });
+  return data;
 }
 
 export async function fetchDastAReviewQueue(
   status?: "pending" | "approved" | "rejected"
 ): Promise<PolicyDraft[]> {
   const qs = status ? `?status=${status}` : "";
-  return fetchJSON<PolicyDraft[]>(
-    `${REEF_DAST_A_URL}/dast-a/review-queue${qs}`
-  );
+  const url = `${REEF_DAST_A_URL}/dast-a/review-queue${qs}`;
+  const mockFiltered = status
+    ? MOCK_DAST_A_REVIEW_QUEUE.filter((d) => d.status === status)
+    : MOCK_DAST_A_REVIEW_QUEUE;
+  const { data } = await fetchWithMock<PolicyDraft[]>(url, mockFiltered, {
+    timeoutMs: DEFAULT_TIMEOUT_MS,
+  });
+  return data;
 }
 
 export interface DastARunRequest {
@@ -68,13 +61,47 @@ export interface DastARunResponse {
   summary?: Record<string, unknown>;
 }
 
+/** Deterministic mock run summary — matches the "78 / 78 attempt-episodes
+ *  blocked" line from SUBMISSION.md. */
+const MOCK_DAST_A_RUN: DastARunResponse = {
+  run_handle: "dast-a-run-26051812-demo",
+  episodes_completed: 5,
+  successes: 0,
+  blocked_by_reef: 5,
+  novel_unblocked: 0,
+  drafts_created: 0,
+  summary: {
+    reef_on: true,
+    blocked_per_pack: {
+      "MCP-RCE-26.04": 1,
+      "EchoLeak-26.05": 2,
+      "MarkdownExfil-26.05": 1,
+      "ToolChain-Drift-26.04": 1,
+    },
+  },
+};
+
 export async function runDastA(
   req: DastARunRequest = {}
 ): Promise<DastARunResponse> {
-  return fetchJSON<DastARunResponse>(`${REEF_DAST_A_URL}/dast-a/run`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ episodes: 5, reef_on: true, ...req }),
-    timeoutMs: 30_000,
-  });
+  const merged = { episodes: 5, reef_on: true, ...req };
+  // Bake the actual episode count + reef_on flag into the mock so the
+  // playground shows numbers that match what the user asked for.
+  const mock: DastARunResponse = {
+    ...MOCK_DAST_A_RUN,
+    episodes_completed: merged.episodes,
+    blocked_by_reef: merged.reef_on ? merged.episodes : 0,
+    successes: merged.reef_on ? 0 : Math.floor(merged.episodes * 0.38),
+  };
+  const { data } = await fetchWithMock<DastARunResponse>(
+    `${REEF_DAST_A_URL}/dast-a/run`,
+    mock,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(merged),
+      timeoutMs: 30_000,
+    }
+  );
+  return data;
 }
