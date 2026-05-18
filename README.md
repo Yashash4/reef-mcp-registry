@@ -7,7 +7,7 @@
 **The first AI deployment that's also the first insurable AI deployment.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-emerald.svg)](./LICENSE)
-[![Built for TechEx 2026](https://img.shields.io/badge/Built%20for-TechEx%202026-cyan.svg)](https://lablab.ai/ai-hackathons/techex-intelligent-enterprise-solutions-hackathon)
+[![TechEx 2026](https://img.shields.io/badge/TechEx-2026-cyan.svg)](https://lablab.ai/ai-hackathons/techex-intelligent-enterprise-solutions-hackathon)
 [![Status: v0.1.0 live](https://img.shields.io/badge/Status-v0.1.0%20%C2%B7%20live-emerald.svg)](https://reef-mcp-registry.vercel.app)
 [![Built on Lobster Trap](https://img.shields.io/badge/Built%20on-Veea%20Lobster%20Trap-violet.svg)](https://github.com/veeainc/lobstertrap)
 
@@ -62,7 +62,7 @@ In April 2026, OX Security disclosed an architectural command-injection flaw in 
 
 **Anthropic did not patch the SDKs.** The MCP ecosystem has no centralized signature registry today; every enterprise running AI agents that bind to MCP is one poisoned package away from cross-fleet compromise.
 
-**Reef ships the open-source Sigstore-style signed registry plus runtime verifier.** When an agent tries to bind to a poisoned or unsigned MCP server, Reef blocks the handshake before any tool call lands. The block surfaces a violation code (`MCP-RCE-26.04`), the verbatim OX Security citation, and a Merkle-anchored audit entry. **Zero of the other 93 TechEx 2026 submissions ship a Sigstore-style MCP registry** (verified by direct GitHub scrape of every published submission).
+**Reef ships the open-source Sigstore-style signed registry plus runtime verifier.** When an agent tries to bind to a poisoned or unsigned MCP server, Reef blocks the handshake before any tool call lands. The block surfaces a violation code (`MCP-RCE-26.04`), the verbatim OX Security citation, and a Merkle-anchored audit entry.
 
 ### Layer 2: EchoLeak / LLM Scope Violation defense · SECONDARY VISCERAL BEAT
 
@@ -85,7 +85,7 @@ Reef outputs the **Reef Insurance Artifact (RIA)**, a 6-page ed25519-signed PDF 
 
 > The risk tier is labelled **"Reef Risk Tier X mapped to Munich Re aiSure axes"** (never bare letters, never "Munich Re Tier"). aiSure is 5 risk categories (hallucination, bias, privacy, IP, performance) by 5 due-diligence axes (data-science process, statistical testing, predictive robustness, scope of validity, performance distribution), loaded verbatim into the Gemini 3 Pro system prompt. The premium range is anchored on the **Mosaic + Munich Re $15M coverage cap (Feb 27 2026)** and labelled as an **ESTIMATED RANGE, not Munich-Re-published**. **Phase 2 integrates real broker API (Bold Penguin, CoverGenius, Vouch dev sandboxes).** *This is a rubric-grounded score, not a Lloyd's quote.*
 
-**Zero of the other 93 TechEx 2026 submissions produce an insurance-grade evidence artifact.** Reef is the categorical separator: not "AI firewall #19 of 18," but the team producing the artifact your underwriter can actually price.
+Reef is the categorical separator: not just another AI firewall, but the team producing the artifact your underwriter can actually price.
 
 ---
 
@@ -293,7 +293,7 @@ MIT. See [LICENSE](./LICENSE) at the repo root.
 
 <div align="center">
 
-**Built to win TechEx 2026** · Track 1: Agent Security & AI Governance (Veea) · Cross-track theme: Gemini
+**TechEx 2026** · Track 1 (Veea) · Gemini theme (cross-track)
 Author: **[Yashash Sheshagiri](https://github.com/Yashash4)** · Repo: [Yashash4/reef-mcp-registry](https://github.com/Yashash4/reef-mcp-registry)
 
 </div>
