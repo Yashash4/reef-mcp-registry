@@ -1,0 +1,14 @@
+.git
+.gitignore
+.dockerignore
+Dockerfile
+*.log
+bin/
+dist/
+build/
+vendor/
+*.test
+*.out
+.DS_Store
+Thumbs.db
+README.md

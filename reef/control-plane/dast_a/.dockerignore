@@ -1,0 +1,23 @@
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+htmlcov
+.venv
+venv
+env
+.git
+.gitignore
+.dockerignore
+Dockerfile
+*.log
+data/
+.DS_Store
+Thumbs.db
+README.md
+# Keep checkpoints/ — committed dast_a_baseline.zip (168KB) is needed at runtime
+# Keep app/ + tests/ — needed for runtime
