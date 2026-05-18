@@ -1,12 +1,29 @@
 # Reef — top-level docker compose
 #
-# Bring-up order: atlas (MCP signature registry) -> lobstertrap-reef -> victim
-# -> stage-ui -> quote -> dast-a
+# One-command quickstart for the full Reef demo:
 #
-# A-5 ships the atlas service end-to-end. Other services come online as their
-# owning agents land their implementations.
-
-version: "3.9"
+#     docker compose up
+#
+# Brings up all 6 services on a shared `reef` bridge network:
+#
+#   victim       Next.js EchoLeak target              http://localhost:3001
+#   atlas        MCP signature registry (FastAPI)     http://localhost:8080
+#   policy-bus   gRPC bus + admin REST                grpc :50051  admin :50052
+#   dast-a       PPO RL adversary + attack packs      http://localhost:8083
+#   quote        RIA generator + underwriter          http://localhost:8082
+#   stage-ui     Public Safety Page (Next.js)         http://localhost:3000
+#
+# Healthchecks gate dependent services. Service-scoped volumes persist
+# audit logs, registry state, signer keys, and generated RIAs across
+# restarts. Set GEMINI_API_KEY in .env for live Gemini calls; sample RIAs
+# and the DAST-A baseline both work without a key.
+#
+# Note: `lobstertrap-reef` (the Go proxy) is built but not started by
+# default — the demo arc uses the live Atlas + policy-bus + Stage UI to
+# drive the cold-open beat. Operators who want the full DPI proxy can
+# enable the `lobstertrap-reef` service with the `proxy` profile:
+#
+#     docker compose --profile proxy up
 
 services:
   atlas:
@@ -31,10 +48,11 @@ services:
       test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8080/healthz').status==200 else 1)\""]
       interval: 5s
       timeout: 3s
-      retries: 10
+      retries: 12
+      start_period: 10s
     restart: unless-stopped
     networks:
-      - reef
+      - reef-net
 
   policy-bus:
     build:
@@ -62,10 +80,49 @@ services:
       test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:50052/healthz').status==200 else 1)\""]
       interval: 5s
       timeout: 3s
-      retries: 10
+      retries: 12
+      start_period: 10s
     restart: unless-stopped
     networks:
-      - reef
+      - reef-net
+
+  dast-a:
+    build:
+      context: ./reef/control-plane/dast_a
+      dockerfile: Dockerfile
+    image: reef/dast-a:dev
+    container_name: reef-dast-a
+    environment:
+      - REEF_DAST_A_DATA_DIR=/data
+      - REEF_DAST_A_CHECKPOINTS_DIR=/checkpoints
+      - REEF_DAST_A_SEED_ON_BOOT=1
+      - REEF_DAST_A_HOST=0.0.0.0
+      - REEF_DAST_A_PORT=8083
+      # Force stub-victim mode inside the container so episodes do not
+      # require a reachable victim. Live drives are easier from the host.
+      - REEF_DAST_A_USE_STUB_VICTIM=1
+      - REEF_VICTIM_URL=http://victim:3001
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - GEMINI_PRO_MODEL=${GEMINI_PRO_MODEL:-gemini-2.0-pro-exp}
+      - GEMINI_FLASH_MODEL=${GEMINI_FLASH_MODEL:-gemini-2.0-flash-exp}
+      - REEF_PLAYWRIGHT_HEADED=${REEF_PLAYWRIGHT_HEADED:-false}
+      - REEF_GEMINI_RED_MAX_ROUNDS=${REEF_GEMINI_RED_MAX_ROUNDS:-5}
+    ports:
+      - "8083:8083"
+    volumes:
+      - dast-a-data:/data
+      # Mount the host checkpoints dir read-only so the committed 168 KB
+      # pre-trained baseline is the one the container loads.
+      - ./reef/control-plane/dast_a/checkpoints:/checkpoints:ro
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8083/healthz').status==200 else 1)\""]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 15s
+    restart: unless-stopped
+    networks:
+      - reef-net
 
   quote:
     build:
@@ -84,7 +141,7 @@ services:
       - REEF_QUOTE_PORT=8082
       - REEF_ATLAS_URL=http://atlas:8080
       - REEF_POLICY_BUS_ADMIN_URL=http://policy-bus:50052
-      - REEF_DAST_A_URL=http://dast-a:8088
+      - REEF_DAST_A_URL=http://dast-a:8083
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - GEMINI_PRO_MODEL=${GEMINI_PRO_MODEL:-gemini-2.0-pro-exp}
       - REEF_UNDERWRITER_COVERAGE_AMOUNT_USD=${REEF_UNDERWRITER_COVERAGE_AMOUNT_USD:-5000000}
@@ -99,25 +156,130 @@ services:
       # when REEF_QUOTE_SAMPLE_ON_BOOT triggers a regeneration.
       - ./reef/control-plane/quote/samples:/samples
     depends_on:
-      - atlas
-      - policy-bus
+      atlas:
+        condition: service_healthy
+      policy-bus:
+        condition: service_healthy
+      dast-a:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8082/healthz').status==200 else 1)\""]
       interval: 5s
       timeout: 3s
-      retries: 10
+      retries: 12
+      start_period: 15s
     restart: unless-stopped
     networks:
-      - reef
+      - reef-net
+
+  victim:
+    build:
+      context: ./victim
+      dockerfile: Dockerfile
+    image: reef/victim:dev
+    container_name: reef-victim
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+      - HOSTNAME=0.0.0.0
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - GEMINI_FLASH_MODEL=${GEMINI_FLASH_MODEL:-gemini-2.0-flash-exp}
+    ports:
+      - "3001:3001"
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3001/', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+    restart: unless-stopped
+    networks:
+      - reef-net
+
+  stage-ui:
+    build:
+      context: ./reef/stage-ui
+      dockerfile: Dockerfile
+      args:
+        # NEXT_PUBLIC_* values are baked at build time. Default to the
+        # localhost ports the host exposes, since the Stage UI is rendered
+        # in the user's browser (not inside the container network).
+        - NEXT_PUBLIC_REEF_ATLAS_URL=http://localhost:8080
+        - NEXT_PUBLIC_REEF_POLICY_BUS_ADMIN_URL=http://localhost:50052
+        - NEXT_PUBLIC_REEF_DAST_A_URL=http://localhost:8083
+        - NEXT_PUBLIC_REEF_QUOTE_URL=http://localhost:8082
+        - NEXT_PUBLIC_REEF_VICTIM_URL=http://localhost:3001
+        - NEXT_PUBLIC_REEF_FLEET_ID=prod-fleet
+    image: reef/stage-ui:dev
+    container_name: reef-stage-ui
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - HOSTNAME=0.0.0.0
+    ports:
+      - "3000:3000"
+    depends_on:
+      atlas:
+        condition: service_healthy
+      policy-bus:
+        condition: service_healthy
+      dast-a:
+        condition: service_healthy
+      quote:
+        condition: service_healthy
+      victim:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3000/', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+    restart: unless-stopped
+    networks:
+      - reef-net
+
+  # Optional: the Go DPI proxy. Run with `docker compose --profile proxy up`.
+  # Disabled by default because the demo arc drives the Atlas + policy bus
+  # + Stage UI surfaces directly; the proxy is the engine that connects
+  # them in a real deployment.
+  lobstertrap-reef:
+    build:
+      context: ./lobstertrap-reef
+      dockerfile: Dockerfile
+    image: reef/lobstertrap-reef:dev
+    container_name: reef-lobstertrap
+    profiles: ["proxy"]
+    environment:
+      - REEF_MCP_REGISTRY_URL=http://atlas:8080
+      - REEF_MCP_REGISTRY_TIMEOUT_MS=1500
+      - REEF_POLICY_BUS_GRPC_URL=policy-bus:50051
+      - REEF_FLEET_ID=prod-fleet
+      - REEF_REGION_ID=us-east
+      - REEF_SITE_ID=site-01
+      - REEF_NODE_ID=node-docker-01
+      - REEF_OTEL_EXPORTER=stdout
+    ports:
+      - "8765:8765"
+      - "9099:9099"
+    depends_on:
+      atlas:
+        condition: service_healthy
+      policy-bus:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - reef-net
 
 volumes:
   atlas-data:
   atlas-keys:
   policy-bus-data:
   policy-bus-keys:
+  dast-a-data:
   quote-data:
   quote-keys:
 
 networks:
-  reef:
+  reef-net:
     driver: bridge
