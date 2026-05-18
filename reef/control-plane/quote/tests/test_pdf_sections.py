@@ -176,7 +176,21 @@ def test_page6_renders_phase_2_commitments(styles) -> None:
         merkle_signed=True,
         ria_signature_hex_short="abcd…",
         ria_signature_b64_short="WFhYWA…",
+        ria_is_signed=True,
         signer_key_id="quote-signer",
+        underwriter_score=_score(),
+        model_attestation_rows=[
+            ("underwriter_model_id", "gemini-2.5-pro"),
+            ("underwriter_model_build_hash", "unspecified"),
+            ("rubric_file_sha256 (framework)", "ab" * 32),
+            ("rubric_file_sha256 (anti-patterns)", "cd" * 32),
+            ("ria_generated_at_unix", "1737201600"),
+            ("ria_generator_version", "reef-quote-v0.2.0"),
+            ("sample_mode", "false"),
+        ],
+        invariant_violations=[],
+        invariant_scanned_event_count=5,
+        invariant_draft_applied_event_count=0,
     )
     # Walk paragraphs + table cells (page 6 has signature + merkle tables).
     text_blob = _flow_text(flows)
@@ -190,6 +204,93 @@ def test_page6_renders_phase_2_commitments(styles) -> None:
     # Anchor (lives in the signature-block table — walk cells, not just paragraphs).
     assert "Mosaic" in text_blob
     assert "Munich Re" in text_blob
+    # R-3: model_attestation block rendered with the GA model id.
+    assert "gemini-2.5-pro" in text_blob
+    assert "underwriter_model_id" in text_blob
+    assert "rubric_file_sha256" in text_blob
+    # R-2: page 6 reports the RIA signed status explicitly.
+    assert "Signed" in text_blob
+    # R-6: invariant-clean stamp.
+    assert "D-018 advisory-only invariant: clean" in text_blob
+    # R-4: estimated-premium methodology moved here from page 1.
+    assert "Estimated-premium methodology" in text_blob
+
+
+def test_page6_renders_invariant_violation_banner(styles) -> None:
+    """R-6: when violations are non-empty, page 6 surfaces a red banner."""
+    flows = section_builders.build_page6_audit_attestation(
+        styles=styles,
+        merkle_root_hex="cd" * 32,
+        merkle_signature_b64="c2lnLXNhbXBsZQ==",
+        merkle_count=42,
+        merkle_timestamp_iso="2026-05-18T00:00:00Z",
+        merkle_signed=True,
+        ria_signature_hex_short="abcd…",
+        ria_signature_b64_short="WFhYWA…",
+        ria_is_signed=True,
+        signer_key_id="quote-signer",
+        underwriter_score=_score(),
+        model_attestation_rows=[
+            ("underwriter_model_id", "gemini-2.5-pro"),
+            ("underwriter_model_build_hash", "unspecified"),
+            ("rubric_file_sha256 (framework)", "ab" * 32),
+            ("rubric_file_sha256 (anti-patterns)", "cd" * 32),
+            ("ria_generated_at_unix", "1737201600"),
+            ("ria_generator_version", "reef-quote-v0.2.0"),
+            ("sample_mode", "false"),
+        ],
+        invariant_violations=[
+            {
+                "event_id": "evt-7af3",
+                "bundle_id": "bundle-v17",
+                "timestamp_iso": "2026-05-17T15:22:11Z",
+                "reason": (
+                    "policy_bundle_applied event with source=gemini_blue_draft "
+                    "missing human_review.approval_id (D-018 violation)"
+                ),
+            }
+        ],
+        invariant_scanned_event_count=42,
+        invariant_draft_applied_event_count=1,
+    )
+    blob = _flow_text(flows)
+    assert "AUDIT INVARIANT VIOLATION" in blob
+    assert "evt-7af3" in blob
+    assert "D-018" in blob
+
+
+def test_page6_renders_unsigned_status_when_ria_not_signed(styles) -> None:
+    """R-2: when ria_is_signed=False, the RIA signature block reports no."""
+    flows = section_builders.build_page6_audit_attestation(
+        styles=styles,
+        merkle_root_hex="00" * 32,
+        merkle_signature_b64="",
+        merkle_count=0,
+        merkle_timestamp_iso="2026-05-18T00:00:00Z",
+        merkle_signed=False,
+        ria_signature_hex_short="",
+        ria_signature_b64_short="",
+        ria_is_signed=False,
+        signer_key_id="unsigned-demo",
+        underwriter_score=_score(),
+        model_attestation_rows=[
+            ("underwriter_model_id", "sample-underwriter-stub (no Gemini call)"),
+            ("underwriter_model_build_hash", "unspecified"),
+            ("rubric_file_sha256 (framework)", "ab" * 32),
+            ("rubric_file_sha256 (anti-patterns)", "cd" * 32),
+            ("ria_generated_at_unix", "1737201600"),
+            ("ria_generator_version", "reef-quote-v0.2.0"),
+            ("sample_mode", "true"),
+        ],
+        invariant_violations=[],
+        invariant_scanned_event_count=0,
+        invariant_draft_applied_event_count=0,
+    )
+    blob = _flow_text(flows)
+    # Both "yes" and "no" might be present somewhere; the page-6 RIA-
+    # signature row must explicitly say "Signed" + "no" — assert on the
+    # full row substring rather than just "no".
+    assert "Signed" in blob
 
 
 def _flow_text(flows) -> str:

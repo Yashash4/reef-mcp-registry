@@ -1,0 +1,17 @@
+# Default line-ending normalization for text files only.
+* text=auto
+
+# Binary artifacts — never normalize.
+*.pdf binary
+*.png binary
+*.zip binary
+*.sig binary
+*.pt binary
+*.pth binary
+*.onnx binary
+
+# Ed25519 PEM key files (committed demo-only sample-signer pair) — keep
+# byte-for-byte stable across checkouts so the committed sample-ria.pdf
+# signature stays in lockstep with sample-signer.pub.
+*.key -text
+*.pub -text

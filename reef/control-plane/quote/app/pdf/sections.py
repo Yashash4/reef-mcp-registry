@@ -96,9 +96,25 @@ def build_page1_executive_summary(
     underwriter_score: UnderwriterScore,
     sample_mode: bool,
 ) -> list[Flowable]:
-    """Page 1 — Reef Risk Tier headline + reasoning + premium range.
+    """Page 1 — Reef Risk Tier headline + reasoning + premium FOOTNOTE.
 
-    Verbatim quotes:
+    Page-1 hero structure (Phase B round 1 R-4 — "tier first, dollar
+    footnoted" per CISO veto on the CFO mis-read):
+
+    1. Identity card (RIA id / fleet / signer).
+    2. Tier headline + framing line — the Munich-Re-mapped Reef Risk
+       Tier is the ONLY callout that gets hero typography. No dollar
+       figures here.
+    3. Underwriter reasoning paragraph.
+    4. Small "Estimated premium range — methodology footnote" subsection
+       at the BOTTOM of page 1. The dollar band sits next to the
+       ESTIMATED-RANGE disclaimer so a CFO scrolling past the tier
+       reads the disclaimer in the same eye-line as the dollar.
+    5. The full per-axis methodology paragraph + recommended exclusions
+       live on page 6 under "Estimated-premium methodology" so the
+       page-1 hero stays tier-first.
+
+    Verbatim quotes preserved:
 
     * :attr:`UnderwriterScore.tier_label_with_framing` — the tier headline.
     * ``score.estimated_premium_range_usd_annual.disclaimer`` — the
@@ -153,7 +169,7 @@ def build_page1_executive_summary(
     out.append(id_table)
     out.append(Spacer(1, 0.18 * inch))
 
-    # Headline tier.
+    # ---- Hero: tier-only callout (R-4) ----------------------------------
     out.append(
         Paragraph(
             underwriter_score.tier_label_with_framing,
@@ -161,47 +177,67 @@ def build_page1_executive_summary(
         )
     )
     out.append(Spacer(1, 0.04 * inch))
-    # Reasoning paragraph.
+    out.append(
+        Paragraph(
+            "This page-1 hero shows the <b>Reef Risk Tier</b> only. The "
+            "estimated annual premium range is footnoted at the bottom "
+            "of this page next to the verbatim "
+            "&quot;ESTIMATED RANGE, not Munich-Re-published&quot; "
+            "disclaimer; the full per-axis methodology lives on page 6.",
+            styles["ReefSmall"],
+        )
+    )
+
+    # Reasoning paragraph (still page 1 — it explains the tier).
+    out.append(Spacer(1, 0.06 * inch))
     out.append(Paragraph("Underwriter reasoning", styles["ReefH3"]))
     out.append(Paragraph(_escape(underwriter_score.reasoning), styles["ReefBody"]))
 
-    # Premium range.
-    premium = underwriter_score.estimated_premium_range_usd_annual
+    # Phase-2 disclaimer (verbatim, immediately under the reasoning so
+    # the reader sees it before the dollar footnote).
     out.append(Spacer(1, 0.06 * inch))
-    out.append(Paragraph("Estimated annual premium range", styles["ReefH3"]))
-    premium_text = (
-        f"<b>USD ${int(premium.low):,} – ${int(premium.high):,}</b> "
-        f"for ${int(premium.coverage_amount_usd):,} aggregate coverage."
-    )
-    out.append(Paragraph(premium_text, styles["ReefBody"]))
     out.append(
         Paragraph(
-            _escape(premium.anchor),
+            _escape(underwriter_score.phase_2_disclaimer),
+            styles["ReefDisclaimer"],
+        )
+    )
+
+    # ---- Page-1 dollar FOOTNOTE (R-4) -----------------------------------
+    # Small footnote-styled block at the bottom of the page. The CFO sees
+    # the tier headline first, scrolls past the reasoning + Phase-2
+    # disclaimer, then reaches a small-typeface dollar band paired with
+    # the ESTIMATED-RANGE disclaimer in the same eye-line.
+    premium = underwriter_score.estimated_premium_range_usd_annual
+    out.append(Spacer(1, 0.10 * inch))
+    out.append(
+        Paragraph(
+            "Estimated annual premium range — methodology footnote",
+            styles["ReefSmallBold"],
+        )
+    )
+    out.append(
+        Paragraph(
+            (
+                f"USD ${int(premium.low):,}–${int(premium.high):,} for "
+                f"${int(premium.coverage_amount_usd):,} aggregate coverage  ·  "
+                + _escape(premium.disclaimer)
+                + "."
+            ),
             styles["ReefSmall"],
         )
     )
     out.append(
         Paragraph(
-            _escape(premium.disclaimer),
-            styles["ReefDisclaimer"],
+            _escape(premium.anchor) + ".",
+            styles["ReefSmall"],
         )
     )
-
-    # Recommended exclusions.
-    if underwriter_score.recommended_exclusions:
-        out.append(Spacer(1, 0.04 * inch))
-        out.append(Paragraph("Recommended exclusions", styles["ReefH3"]))
-        bullet_text = "<br/>".join(
-            "• " + _escape(x) for x in underwriter_score.recommended_exclusions
-        )
-        out.append(Paragraph(bullet_text, styles["ReefBodyDense"]))
-
-    # Phase-2 disclaimer (verbatim).
-    out.append(Spacer(1, 0.10 * inch))
     out.append(
         Paragraph(
-            _escape(underwriter_score.phase_2_disclaimer),
-            styles["ReefDisclaimer"],
+            "See <b>page 6 — Estimated-premium methodology</b> for the "
+            "per-axis derivation and the recommended-exclusion list.",
+            styles["ReefSmall"],
         )
     )
     out.append(PageBreak())
@@ -523,8 +559,10 @@ def build_page4_attack_heatmap(
     real_days = len(telemetry) - demo_days
     legend = (
         f"{real_days} day(s) of real audit data · {demo_days} day(s) labelled "
-        f"<b>(demo seed)</b>. Cells are coloured by per-day count: white = 0, "
-        f"warm = high. Buckets aggregate OWASP/MITRE tags into 6 rows for "
+        f"<b>(demo seed)</b>. Real-data cells use the warm reef-teal ramp; "
+        f"demo-seed cells are de-emphasised at ~50% saturation, carry an "
+        f"in-cell <i>(s)</i> watermark, and never visually outweigh real "
+        f"events. Buckets aggregate OWASP/MITRE tags into 6 rows for "
         f"visual scan."
     )
     out.append(Paragraph(legend, styles["ReefBodyMuted"]))
@@ -532,7 +570,6 @@ def build_page4_attack_heatmap(
 
     # We render a transposed grid: rows = bucket, cols = day.
     # First column = bucket label, then one narrow column per day.
-    col_count = len(telemetry) + 1
     day_col_width = (
         (7.4 * inch) - 1.3 * inch
     ) / max(len(telemetry), 1)
@@ -549,7 +586,16 @@ def build_page4_attack_heatmap(
         row: list[Any] = [bucket]
         for d in telemetry:
             count = d.by_bucket.get(bucket, 0)
-            row.append(str(count) if count else "")
+            if not count:
+                row.append("")
+            elif d.is_demo_seed:
+                # R-5: visible "(s)" watermark stamp inside every demo-
+                # seed cell. The auditor can never confuse a demo-seed
+                # cell for a real-event cell — the cell carries both a
+                # de-saturated cool-grey background AND the (s) glyph.
+                row.append(f"{count}(s)")
+            else:
+                row.append(str(count))
         rows.append(row)
     totals_row: list[Any] = ["Total"]
     for d in telemetry:
@@ -566,7 +612,7 @@ def build_page4_attack_heatmap(
     style.append(("FONTNAME", (0, 1), (0, -1), "Helvetica-Bold"))
     style.append(("ALIGN", (1, 1), (-1, -1), "CENTER"))
     style.append(("VALIGN", (0, 1), (-1, -1), "MIDDLE"))
-    style.append(("FONTSIZE", (1, 1), (-1, -1), 6))
+    style.append(("FONTSIZE", (1, 1), (-1, -1), 5.4))
     style.append(("LEFTPADDING", (0, 0), (-1, -1), 1))
     style.append(("RIGHTPADDING", (0, 0), (-1, -1), 1))
     style.append(("TOPPADDING", (0, 0), (-1, -1), 1.5))
@@ -583,6 +629,12 @@ def build_page4_attack_heatmap(
             intensity = min(1.0, count / max(max_count, 1))
             bg = _heat_color(intensity, is_demo=d.is_demo_seed)
             style.append(("BACKGROUND", (c, r), (c, r), bg))
+            if d.is_demo_seed:
+                # R-5: also mute the text colour so the (s) cells read
+                # quieter than the real-event cells.
+                style.append(
+                    ("TEXTCOLOR", (c, r), (c, r), st.COLOR_INK_FADED)
+                )
     # Totals row.
     style.append(("FONTNAME", (0, bucket_count + 1), (-1, bucket_count + 1), "Helvetica-Bold"))
     style.append(("BACKGROUND", (0, bucket_count + 1), (-1, bucket_count + 1), st.COLOR_PANEL))
@@ -590,11 +642,15 @@ def build_page4_attack_heatmap(
     out.append(table)
 
     out.append(Spacer(1, 0.06 * inch))
+    # R-5 — explicit page-bottom legend (verbatim text the CISO can quote).
     out.append(
         Paragraph(
-            "<b>(demo seed)</b> days are clearly flagged and the cell heat is "
-            "rendered with a cooler hue so the auditor can distinguish real "
-            "events from seeded data at a glance.",
+            "<b>Legend (R-5).</b> Cells marked <b>(s)</b> are deterministic "
+            "demo-seed data. They are rendered at ~50% saturation against a "
+            "cool-grey ramp so they never visually outweigh real events. "
+            "Replace with live audit log for production RIAs — the live RIA "
+            "drops the (s) cells the moment a real event lands on that "
+            "calendar day.",
             styles["ReefSmall"],
         )
     )
@@ -602,21 +658,33 @@ def build_page4_attack_heatmap(
     return out
 
 
+# R-5 saturation knob for demo-seed cells. 0.50 = render at 50% of the
+# real-event-cell saturation so an auditor scanning the page reads the
+# cool-grey demo cells as visually quieter than the warm real cells.
+_DEMO_SEED_SATURATION_FACTOR = 0.50
+
+
 def _heat_color(intensity: float, *, is_demo: bool):
     """Return a reportlab color for a heatmap cell.
 
-    Real events: warm reef teal ramp. Demo seed: cooler grey-cream ramp.
+    Real events: warm reef-teal ramp (cream → amber → burnt orange).
+    Demo seed: muted grey-cream ramp at
+    :data:`_DEMO_SEED_SATURATION_FACTOR` (~50%) of the real-cell
+    saturation per Phase B round 1 R-5.
     """
     from reportlab.lib.colors import Color
 
     intensity = max(0.0, min(1.0, intensity))
     if is_demo:
-        # Cool grey ramp.
-        base_r, base_g, base_b = (0.78, 0.78, 0.74)
+        # Anchor cell colour at the page background so the cell mass
+        # fades into the page rather than reading as a hot warning.
+        bg_r, bg_g, bg_b = (st.COLOR_BG.red, st.COLOR_BG.green, st.COLOR_BG.blue)
+        target_r, target_g, target_b = (0.45, 0.45, 0.42)
+        muted_intensity = intensity * _DEMO_SEED_SATURATION_FACTOR
         return Color(
-            base_r - 0.35 * intensity,
-            base_g - 0.35 * intensity,
-            base_b - 0.30 * intensity,
+            bg_r + (target_r - bg_r) * muted_intensity,
+            bg_g + (target_g - bg_g) * muted_intensity,
+            bg_b + (target_b - bg_b) * muted_intensity,
         )
     # Warm cream-to-burnt-orange ramp.
     if intensity < 0.5:
@@ -751,19 +819,46 @@ def build_page6_audit_attestation(
     merkle_signed: bool,
     ria_signature_hex_short: str,
     ria_signature_b64_short: str,
+    ria_is_signed: bool,
     signer_key_id: str,
+    underwriter_score: UnderwriterScore,
+    model_attestation_rows: list[tuple[str, str]],
+    invariant_violations: list[dict[str, Any]],
+    invariant_scanned_event_count: int,
+    invariant_draft_applied_event_count: int,
 ) -> list[Flowable]:
+    """Page 6 — Audit attestation + model_attestation + invariant scan + premium methodology.
+
+    Phase B round 1 refinements:
+
+    * R-2: ``ria_is_signed`` drives the RIA signature block's "Signed:
+      yes/no" indicator, which MUST agree with the footer. Today every
+      generated RIA is signed so this is always ``yes``; the parameter
+      exists so a future unsigned-demo path produces an honest "no" that
+      lines up with the footer's "Unsigned demo build" stamp.
+    * R-3: ``model_attestation_rows`` renders a mono table covering the
+      Gemini model ID + rubric SHA-256s + RIA generator version. The
+      block is the NYDFS Part 500 / OCC SR-21-14 model-risk artifact the
+      auditor reads to verify "which model produced this score".
+    * R-4: a full "Estimated-premium methodology" subsection on page 6
+      (moved from page 1's hero) carries the dollar band + per-axis
+      derivation + recommended exclusions next to the verbatim
+      ESTIMATED-RANGE disclaimer.
+    * R-6: if ``invariant_violations`` is non-empty, a red
+      "AUDIT INVARIANT VIOLATION" banner lists each offending event so
+      the artifact NEVER hides a D-018 violation. Otherwise a single-
+      line "0 violations" stamp records the scan ran.
+    """
     out: list[Flowable] = []
     out.append(Paragraph("Audit attestation + Phase 2 commitments", styles["ReefH1"]))
     out.append(
         Paragraph(
-            "The RIA is signed (ed25519) over the full PDF bytes. The Merkle "
-            "audit root below cryptographically pins every action verdict the "
-            "fleet recorded during the audit window.",
+            "The RIA is signed (ed25519) over the full PDF bytes; the Merkle "
+            "audit root below pins every action verdict from the audit window.",
             styles["ReefBodyMuted"],
         )
     )
-    out.append(Spacer(1, 0.06 * inch))
+    out.append(Spacer(1, 0.04 * inch))
 
     merkle_table = Table(
         [
@@ -780,50 +875,121 @@ def build_page6_audit_attestation(
         TableStyle(
             [
                 ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
-                ("FONTSIZE", (0, 0), (-1, -1), 7.6),
+                ("FONTSIZE", (0, 0), (-1, -1), 6.8),
                 ("TEXTCOLOR", (0, 0), (0, -1), st.COLOR_INK_MUTED),
                 ("BACKGROUND", (0, 0), (-1, -1), st.COLOR_PANEL),
                 ("BOX", (0, 0), (-1, -1), 0.4, st.COLOR_PANEL_EDGE),
                 ("LEFTPADDING", (0, 0), (-1, -1), 4),
                 ("RIGHTPADDING", (0, 0), (-1, -1), 4),
-                ("TOPPADDING", (0, 0), (-1, -1), 2.5),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
+                ("TOPPADDING", (0, 0), (-1, -1), 1.5),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 1.5),
                 ("FONTNAME", (1, 0), (1, 1), "Courier"),
             ]
         )
     )
     out.append(merkle_table)
 
-    out.append(Spacer(1, 0.06 * inch))
-    out.append(Paragraph("Verifier CLI", styles["ReefH3"]))
+    out.append(Spacer(1, 0.04 * inch))
     cli = (
+        "<b>Verifier CLI:</b> "
         "<font face=\"Courier\">lobstertrap audit verify --event-id &lt;id&gt; "
-        f"--root {(merkle_root_hex or '&lt;root&gt;')[:24]}…"
-        "</font>"
+        f"--root {(merkle_root_hex or '&lt;root&gt;')[:24]}…</font> "
+        "(exit 0 = proof verified; non-zero = tampered)."
     )
-    out.append(Paragraph(cli, styles["ReefBodyDense"]))
-    out.append(
-        Paragraph(
-            "Operators run the verifier against the JSONL audit log to prove a "
-            "specific event was included in the signed root. Exit code 0 = "
-            "proof verified; non-zero = tampered.",
-            styles["ReefSmall"],
-        )
-    )
+    out.append(Paragraph(cli, styles["ReefSmall"]))
 
-    # Phase 2 commitments — VERBATIM list.
-    out.append(Spacer(1, 0.12 * inch))
-    out.append(Paragraph("Phase 2 commitments", styles["ReefH2"]))
-    for i, item in enumerate(PHASE_2_COMMITMENTS_VERBATIM, start=1):
+    # ---- R-6: D-018 audit invariant scan result -------------------------
+    out.append(Spacer(1, 0.06 * inch))
+    if invariant_violations:
+        # Red banner — the artifact NEVER hides a D-018 violation.
         out.append(
             Paragraph(
-                f"{i}. {_escape(item)}",
-                styles["ReefBody"],
+                f"<font color=\"#B0413E\"><b>"
+                f"⚠ AUDIT INVARIANT VIOLATION — "
+                f"{len(invariant_violations)} Gemini-Flash-drafted bundle(s) "
+                f"applied without human_review.approval_id"
+                f"</b></font>",
+                styles["ReefSmallBold"],
+            )
+        )
+        for v in invariant_violations:
+            out.append(
+                Paragraph(
+                    "• <b>"
+                    + _escape(str(v.get("event_id")))
+                    + "</b> — bundle "
+                    + _escape(str(v.get("bundle_id")))
+                    + " @ "
+                    + _escape(str(v.get("timestamp_iso")))
+                    + " — "
+                    + _escape(str(v.get("reason"))),
+                    styles["ReefSmall"],
+                )
+            )
+        out.append(
+            Paragraph(
+                "D-018 (advisory-only) requires every Gemini-Flash-drafted "
+                "policy bundle to carry a non-empty "
+                "<font face=\"Courier\">human_review.approval_id</font> "
+                "before application.",
+                styles["ReefSmall"],
+            )
+        )
+    else:
+        out.append(
+            Paragraph(
+                "<b>D-018 advisory-only invariant: clean.</b> "
+                f"Scanned {invariant_scanned_event_count} event(s); "
+                f"{invariant_draft_applied_event_count} draft-sourced "
+                "applies, 0 violations.",
+                styles["ReefSmall"],
             )
         )
 
-    # Phase 2 disclaimer — VERBATIM.
+    # ---- R-4: Estimated-premium methodology (moved from page-1 hero) ---
     out.append(Spacer(1, 0.06 * inch))
+    out.append(Paragraph("Estimated-premium methodology", styles["ReefH2"]))
+    premium = underwriter_score.estimated_premium_range_usd_annual
+    out.append(
+        Paragraph(
+            (
+                f"<b>USD ${int(premium.low):,}–${int(premium.high):,}</b> "
+                f"for ${int(premium.coverage_amount_usd):,} aggregate "
+                "coverage. " + _escape(premium.disclaimer) + ". "
+                + _escape(premium.anchor) + "."
+            ),
+            styles["ReefBodyDense"],
+        )
+    )
+    # Per-axis context (condensed inline).
+    axes = underwriter_score.due_diligence_axes
+    axis_inline = (
+        f"<b>Munich Re aiSure axes — Reef self-rating:</b> "
+        f"data-science process = {_escape(axes.data_science_process_quality)}; "
+        f"statistical testing = {_escape(axes.statistical_testing_rigor)}; "
+        f"predictive robustness = {_escape(axes.predictive_robustness)}; "
+        f"scope of validity = {_escape(axes.scope_of_validity)}; "
+        f"performance probability distribution = "
+        f"{_escape(axes.performance_probability_distribution)}."
+    )
+    out.append(Paragraph(axis_inline, styles["ReefSmall"]))
+    if underwriter_score.recommended_exclusions:
+        bullet_text = "<b>Recommended exclusions:</b> " + "; ".join(
+            _escape(x) for x in underwriter_score.recommended_exclusions
+        ) + "."
+        out.append(Paragraph(bullet_text, styles["ReefSmall"]))
+
+    # Phase 2 commitments — VERBATIM list (single dense paragraph).
+    out.append(Spacer(1, 0.06 * inch))
+    out.append(Paragraph("Phase 2 commitments", styles["ReefH2"]))
+    phase2_inline = "<br/>".join(
+        f"{i}. {_escape(item)}"
+        for i, item in enumerate(PHASE_2_COMMITMENTS_VERBATIM, start=1)
+    )
+    out.append(Paragraph(phase2_inline, styles["ReefBodyDense"]))
+
+    # Phase 2 disclaimer — VERBATIM.
+    out.append(Spacer(1, 0.04 * inch))
     out.append(
         Paragraph(
             "<b>Phase 2 disclaimer (verbatim):</b> " + _escape(PHASE_2_DISCLAIMER),
@@ -831,36 +997,78 @@ def build_page6_audit_attestation(
         )
     )
 
-    # RIA signature block at the bottom — embedded for human display.
-    out.append(Spacer(1, 0.12 * inch))
-    out.append(Paragraph("RIA signature (Sigstore-style)", styles["ReefH3"]))
-    sig_table = Table(
-        [
-            ["Signer key ID", _escape(signer_key_id)],
-            ["Signature (hex, truncated)", _escape(ria_signature_hex_short)],
-            ["Signature (base64, truncated)", _escape(ria_signature_b64_short)],
-            ["Algorithm", "ed25519 over SHA-256(pdf_bytes)"],
+    # ---- R-3: Model attestation block ----------------------------------
+    out.append(Spacer(1, 0.06 * inch))
+    out.append(
+        Paragraph(
+            "Model attestation (NYDFS Part 500 / OCC SR-21-14)",
+            styles["ReefH3"],
+        )
+    )
+    model_table_data = [
+        [_escape(key), _escape(value)] for (key, value) in model_attestation_rows
+    ]
+    if not model_table_data:
+        # Defensive — never render an empty table.
+        model_table_data = [["(model attestation unavailable)", ""]]
+    model_table = Table(
+        model_table_data,
+        colWidths=[2.2 * inch, 4.6 * inch],
+    )
+    model_table.setStyle(
+        TableStyle(
             [
-                "Anchor",
-                f"Munich Re aiSure framework · Mosaic + Munich Re ${MOSAIC_MUNICH_RE_CAP_USD:,} cap "
-                f"({MOSAIC_MUNICH_RE_ANNOUNCEMENT_DATE})",
-            ],
+                ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+                ("FONTNAME", (1, 0), (1, -1), "Courier"),
+                ("FONTSIZE", (0, 0), (-1, -1), 6.6),
+                ("TEXTCOLOR", (0, 0), (0, -1), st.COLOR_INK_MUTED),
+                ("TEXTCOLOR", (1, 0), (1, -1), st.COLOR_INK),
+                ("BACKGROUND", (0, 0), (-1, -1), st.COLOR_PANEL),
+                ("BOX", (0, 0), (-1, -1), 0.4, st.COLOR_PANEL_EDGE),
+                ("INNERGRID", (0, 0), (-1, -1), 0.15, st.COLOR_PANEL_EDGE),
+                ("LEFTPADDING", (0, 0), (-1, -1), 4),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+                ("TOPPADDING", (0, 0), (-1, -1), 1.5),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 1.5),
+            ]
+        )
+    )
+    out.append(model_table)
+
+    # RIA signature block at the bottom — embedded for human display.
+    out.append(Spacer(1, 0.06 * inch))
+    out.append(Paragraph("RIA signature (Sigstore-style)", styles["ReefH3"]))
+    sig_rows = [
+        ["Signed", "yes" if ria_is_signed else "no"],
+        ["Signer key ID", _escape(signer_key_id)],
+        ["Signature (hex, truncated)", _escape(ria_signature_hex_short)],
+        ["Signature (base64, truncated)", _escape(ria_signature_b64_short)],
+        ["Algorithm", "ed25519 over SHA-256(pdf_bytes)"],
+        [
+            "Anchor",
+            f"Munich Re aiSure framework · Mosaic + Munich Re ${MOSAIC_MUNICH_RE_CAP_USD:,} cap "
+            f"({MOSAIC_MUNICH_RE_ANNOUNCEMENT_DATE})",
         ],
+    ]
+    sig_table = Table(
+        sig_rows,
         colWidths=[1.7 * inch, 5.1 * inch],
     )
     sig_table.setStyle(
         TableStyle(
             [
                 ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
-                ("FONTSIZE", (0, 0), (-1, -1), 7.6),
+                ("FONTSIZE", (0, 0), (-1, -1), 6.8),
                 ("TEXTCOLOR", (0, 0), (0, -1), st.COLOR_INK_MUTED),
                 ("BACKGROUND", (0, 0), (-1, -1), st.COLOR_PANEL),
                 ("BOX", (0, 0), (-1, -1), 0.4, st.COLOR_PANEL_EDGE),
-                ("FONTNAME", (1, 1), (1, 2), "Courier"),
+                # The hex/base64 signature rows are columns 1 row 2..3 in
+                # this 0-indexed table.
+                ("FONTNAME", (1, 2), (1, 3), "Courier"),
                 ("LEFTPADDING", (0, 0), (-1, -1), 4),
                 ("RIGHTPADDING", (0, 0), (-1, -1), 4),
-                ("TOPPADDING", (0, 0), (-1, -1), 2.5),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
+                ("TOPPADDING", (0, 0), (-1, -1), 1.5),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 1.5),
             ]
         )
     )

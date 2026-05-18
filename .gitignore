@@ -88,7 +88,8 @@ fleet-state/
 
 # Reef Quote (Layer 7) — RIA generator
 # The sample RIA + detached signature + sample-signer.pub get committed for
-# judges to download + verify. The private key + scratch working dir do not.
+# judges to download + verify. The operator's runtime private key + scratch
+# working dir do NOT.
 # Note: we blocklist subdirectories rather than the data/keys dirs themselves
 # so .gitkeep files inside stay tracked (preserves the directory layout in
 # fresh clones).
@@ -97,6 +98,14 @@ reef/control-plane/quote/keys/*
 !reef/control-plane/quote/keys/.gitkeep
 reef/control-plane/quote/samples/.keys/
 reef/control-plane/quote/samples/.working/
+# Phase B round 1 R-1 — the committed sample-signer keypair is a DEMO-ONLY
+# key that lets any auditor cloning the repo offline-verify the committed
+# sample-ria.pdf. It is NOT the operator's production signer; the operator
+# signer path lives at REEF_QUOTE_SIGNER_PRIV_KEY (gitignored by the *.key
+# rule above). Re-allow the specific filename + the PEM-formatted public key
+# next to it.
+!reef/control-plane/quote/samples/sample-signer.key
+!reef/control-plane/quote/samples/sample-signer.pub
 
 # Upstream Lobster Trap clone (read-only reference, not committed; A-3 will fork into lobstertrap-reef/)
 lobstertrap-upstream/

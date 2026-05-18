@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "reef-quote"
-version = "0.1.0"
-description = "Reef Quote — Munich Re-grounded AI-deployment underwriter agent (Gemini 3 Pro) + RIA PDF generator (Layer 7)."
+version = "0.2.0"
+description = "Reef Quote — Munich Re-grounded AI-deployment underwriter agent (Gemini 3 Pro) + RIA PDF generator (Layer 7). Phase B round 1 refinement: artifact-integrity-clean signed sample + GA Gemini model pin + model_attestation block + D-018 audit invariant scan."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }

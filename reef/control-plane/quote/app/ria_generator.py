@@ -10,9 +10,15 @@ Workflow:
    * Lobster Trap audit (signed Merkle root via Go CLI)
    * UnderwriterAgent (Gemini 3 Pro — or :class:`SampleUnderwriterAgent`
      when ``GEMINI_API_KEY`` is missing).
-3. Build the 6 sections, render to PDF bytes in memory.
-4. Sign the PDF bytes (ed25519 over SHA-256) + write the detached `.sig`.
-5. Persist ``<data_dir>/ria/<ria_id>.pdf`` and return the
+3. Compute model_attestation block (Gemini model IDs + rubric file
+   sha256 digests + ria_generator version) per Phase B round 1 R-3.
+4. Scan the policy bus audit JSONL for D-018 invariant violations
+   (R-6: any ``policy_bundle_applied`` event whose source is
+   ``gemini_blue_draft`` MUST carry a non-empty
+   ``human_review.approval_id``).
+5. Build the 6 sections, render to PDF bytes in memory.
+6. Sign the PDF bytes (ed25519 over SHA-256) + write the detached `.sig`.
+7. Persist ``<data_dir>/ria/<ria_id>.pdf`` and return the
    :class:`RIAArtifact` envelope.
 
 Single function entrypoint :func:`generate_ria` keeps callers (API handler,
@@ -24,11 +30,12 @@ import dataclasses
 import datetime as dt
 import hashlib
 import io
+import json
 import logging
 import os
 import secrets
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Iterable, Optional
 
 import httpx
 from reportlab.platypus import Flowable
@@ -65,6 +72,7 @@ from app.pdf import sections as section_builders
 from app.pdf.layout import RIADocTemplate, RIAHeaderContext
 from app.pdf.style import build_stylesheet
 from app.ria_signer import RIASigner, SignedPDFRecord
+from app.rubrics import ANTI_PATTERNS_PATH, FRAMEWORK_PATH
 from app.underwriter_agent import (
     DueDiligenceAxes,
     EstimatedPremiumRange,
@@ -166,6 +174,69 @@ class SampleUnderwriterAgent:
 
 
 @dataclasses.dataclass
+class ModelAttestation:
+    """Page-6 model attestation block (R-3).
+
+    Records the GA Gemini model IDs the underwriter agent was configured
+    against + the sha256 of each rubric file that grounded the call so a
+    NYDFS Part 500 / OCC SR-21-14 auditor can verify which model + which
+    rubric produced the score. ``underwriter_model_build_hash`` is best-
+    effort — the Google generative AI SDK does not expose model build
+    hashes today, so this defaults to ``"unspecified"`` rather than a
+    fabricated value.
+    """
+
+    underwriter_model_id: str
+    underwriter_model_build_hash: str
+    rubric_file_sha256_framework: str
+    rubric_file_sha256_antipatterns: str
+    ria_generated_at_unix: int
+    ria_generator_version: str
+    sample_mode: bool
+
+    def as_table_rows(self) -> list[tuple[str, str]]:
+        return [
+            ("underwriter_model_id", self.underwriter_model_id),
+            ("underwriter_model_build_hash", self.underwriter_model_build_hash),
+            ("rubric_file_sha256 (framework)", self.rubric_file_sha256_framework),
+            ("rubric_file_sha256 (anti-patterns)", self.rubric_file_sha256_antipatterns),
+            ("ria_generated_at_unix", str(self.ria_generated_at_unix)),
+            ("ria_generator_version", self.ria_generator_version),
+            ("sample_mode", "true" if self.sample_mode else "false"),
+        ]
+
+
+@dataclasses.dataclass
+class AuditInvariantViolation:
+    """One audit event that breaks the D-018 advisory-only invariant.
+
+    Per R-6: any ``policy_bundle_applied`` event whose
+    ``source == "gemini_blue_draft"`` MUST carry a non-empty
+    ``human_review.approval_id`` field — otherwise a Gemini-Flash-drafted
+    bundle was applied without operator approval, which violates D-018.
+    """
+
+    event_id: str
+    bundle_id: str
+    timestamp_iso: str
+    reason: str
+
+
+@dataclasses.dataclass
+class AuditInvariantReport:
+    """Result of the D-018 advisory-only invariant scan."""
+
+    scanned_event_count: int
+    draft_applied_event_count: int
+    violations: list[AuditInvariantViolation]
+    scanned_path: Optional[str]
+
+    @property
+    def has_violations(self) -> bool:
+        return bool(self.violations)
+
+
+@dataclasses.dataclass
 class RIAArtifact:
     """Envelope returned by :func:`generate_ria`."""
 
@@ -185,6 +256,8 @@ class RIAArtifact:
     sample_mode: bool
     fleet_id: str
     generated_at: dt.datetime
+    model_attestation: ModelAttestation
+    audit_invariant_report: AuditInvariantReport
 
 
 @dataclasses.dataclass
@@ -212,6 +285,9 @@ class RIAGenerateOptions:
     additional_agents: Optional[list[dict[str, Any]]] = None
     additional_models: Optional[list[dict[str, Any]]] = None
     additional_tools: Optional[list[dict[str, Any]]] = None
+    # Override for R-6 audit invariant scan — tests pass a list of audit
+    # events directly so they don't need to materialise a JSONL fixture.
+    policy_bus_audit_override: Optional[list[dict[str, Any]]] = None
     # When True, queries that raise transport errors are swallowed into the
     # sample-mode fallback. Production live mode keeps this False so the
     # operator sees the failure rather than getting silent stub output.
@@ -234,6 +310,7 @@ def generate_ria(opts: RIAGenerateOptions) -> RIAArtifact:
     policy_bus_payload = _resolve_policy_bus_payload(opts, urls)
     dast_a_payload = _resolve_dast_a_payload(opts, urls)
     merkle = _resolve_merkle_root(opts)
+    policy_bus_audit_for_invariants = opts.policy_bus_audit_override
 
     # ---- 2. Derive matrices ----------------------------------------------
     rule_names = extract_policy_rule_names_from_bundles(
@@ -290,6 +367,17 @@ def generate_ria(opts: RIAGenerateOptions) -> RIAArtifact:
         coverage_amount_usd=opts.coverage_amount_usd,
     )
 
+    # ---- 4b. Model attestation block (R-3) ------------------------------
+    model_attestation = build_model_attestation(
+        sample_mode=sample_mode, generated_at=now
+    )
+
+    # ---- 4c. D-018 audit invariant scan (R-6) ---------------------------
+    invariant_report = scan_audit_for_invariants(
+        policy_bus_audit_path=policy_bus_audit_path,
+        events_override=policy_bus_audit_for_invariants,
+    )
+
     # ---- 5. Signer (constructed after sample-mode is resolved so the env
     #         can still set the signer key id) ------------------------------
     signer = opts.signer or RIASigner()
@@ -337,6 +425,8 @@ def generate_ria(opts: RIAGenerateOptions) -> RIAArtifact:
         packs=packs,
         merkle=merkle,
         sample_mode=sample_mode,
+        model_attestation=model_attestation,
+        invariant_report=invariant_report,
     )
 
     pre_signed = signer.sign_pdf_bytes(pre_bytes)
@@ -354,6 +444,8 @@ def generate_ria(opts: RIAGenerateOptions) -> RIAArtifact:
         packs=packs,
         merkle=merkle,
         sample_mode=sample_mode,
+        model_attestation=model_attestation,
+        invariant_report=invariant_report,
     )
     final_signed = signer.sign_pdf_bytes(final_bytes)
 
@@ -378,6 +470,8 @@ def generate_ria(opts: RIAGenerateOptions) -> RIAArtifact:
         sample_mode=sample_mode,
         fleet_id=opts.fleet_id,
         generated_at=now,
+        model_attestation=model_attestation,
+        audit_invariant_report=invariant_report,
     )
 
 
@@ -634,11 +728,163 @@ def _stub_dast_a_payload() -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# PDF rendering
+# Generator version constant — also stamped on every RIA's page-6
+# model_attestation block (R-3).
 # ---------------------------------------------------------------------------
 
 
-REEF_VERSION = "0.1.0"
+REEF_VERSION = "0.2.0"
+
+
+# ---------------------------------------------------------------------------
+# Model attestation + audit invariant helpers (Phase B round 1 R-3 + R-6)
+# ---------------------------------------------------------------------------
+
+
+def _file_sha256_hex(path: Path) -> str:
+    """Return the SHA-256 hex digest of a file, or 'unavailable' if missing.
+
+    Used by the model_attestation block. Missing rubric files would be a
+    serious operational error in production but we surface the string
+    "unavailable" rather than raising so the RIA still renders + the
+    auditor sees the gap on page 6.
+    """
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except FileNotFoundError:
+        logger.warning("rubric file missing for model_attestation: %s", path)
+        return "unavailable"
+
+
+def build_model_attestation(
+    *,
+    sample_mode: bool,
+    generated_at: dt.datetime,
+    pro_model_env_var: str = "GEMINI_PRO_MODEL",
+    framework_path: Optional[Path] = None,
+    anti_patterns_path: Optional[Path] = None,
+) -> ModelAttestation:
+    """Compose the page-6 model_attestation block (R-3).
+
+    Reads the Pro model identifier from env (D-017 — never hardcoded). In
+    sample mode the underwriter is the deterministic stub, so the model
+    field records ``"sample-underwriter-stub (no Gemini call)"`` so the
+    auditor can tell a sample artifact apart from a live one at a glance.
+
+    The Google generative AI SDK does not expose model build hashes today,
+    so ``underwriter_model_build_hash`` records ``"unspecified"`` rather
+    than fabricating a value. If a future SDK release exposes that field
+    we can populate it here.
+    """
+    framework_path = framework_path or FRAMEWORK_PATH
+    anti_patterns_path = anti_patterns_path or ANTI_PATTERNS_PATH
+
+    if sample_mode:
+        underwriter_model_id = "sample-underwriter-stub (no Gemini call)"
+    else:
+        underwriter_model_id = (
+            os.environ.get(pro_model_env_var) or "unspecified"
+        )
+
+    return ModelAttestation(
+        underwriter_model_id=underwriter_model_id,
+        underwriter_model_build_hash="unspecified",
+        rubric_file_sha256_framework=_file_sha256_hex(framework_path),
+        rubric_file_sha256_antipatterns=_file_sha256_hex(anti_patterns_path),
+        ria_generated_at_unix=int(generated_at.timestamp()),
+        ria_generator_version=f"reef-quote-v{REEF_VERSION}",
+        sample_mode=sample_mode,
+    )
+
+
+def _iter_audit_events_from_path(path: Path) -> Iterable[dict[str, Any]]:
+    """Stream audit events from a JSONL file, skipping unparseable lines."""
+    if not path.exists():
+        return
+    with path.open("r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                logger.warning(
+                    "audit-invariant scan: malformed line in %s: %r",
+                    path,
+                    line[:120],
+                )
+                continue
+            if isinstance(row, dict):
+                yield row
+
+
+def scan_audit_for_invariants(
+    *,
+    policy_bus_audit_path: Path,
+    events_override: Optional[list[dict[str, Any]]] = None,
+) -> AuditInvariantReport:
+    """Scan the policy bus audit JSONL for D-018 invariant violations (R-6).
+
+    Iterates each event with ``kind == "policy_bundle_applied"``. If the
+    event's ``source == "gemini_blue_draft"`` and there is no non-empty
+    ``human_review.approval_id`` field, append the event to the
+    violations list. The page-6 builder renders a red banner when this
+    list is non-empty.
+
+    ``events_override`` lets tests inject a synthetic event stream
+    without materialising a JSONL fixture. When provided, the
+    on-disk path is NOT read.
+    """
+    violations: list[AuditInvariantViolation] = []
+    scanned = 0
+    draft_applied = 0
+
+    if events_override is not None:
+        source_iter: Iterable[dict[str, Any]] = events_override
+        scanned_path: Optional[str] = None
+    else:
+        source_iter = _iter_audit_events_from_path(policy_bus_audit_path)
+        scanned_path = str(policy_bus_audit_path)
+
+    for event in source_iter:
+        scanned += 1
+        kind = event.get("kind") or event.get("event_kind")
+        if kind != "policy_bundle_applied":
+            continue
+        source = (event.get("source") or event.get("bundle_source") or "").strip()
+        if source != "gemini_blue_draft":
+            continue
+        draft_applied += 1
+        human_review = event.get("human_review") or {}
+        approval_id = ""
+        if isinstance(human_review, dict):
+            approval_id = (human_review.get("approval_id") or "").strip()
+        if not approval_id:
+            violations.append(
+                AuditInvariantViolation(
+                    event_id=str(event.get("event_id") or event.get("id") or "<unknown>"),
+                    bundle_id=str(event.get("bundle_id") or "<unknown>"),
+                    timestamp_iso=str(
+                        event.get("timestamp")
+                        or event.get("ts")
+                        or event.get("timestamp_iso")
+                        or "<unknown>"
+                    ),
+                    reason=(
+                        "policy_bundle_applied event with "
+                        "source=gemini_blue_draft missing "
+                        "human_review.approval_id (D-018 violation)"
+                    ),
+                )
+            )
+
+    return AuditInvariantReport(
+        scanned_event_count=scanned,
+        draft_applied_event_count=draft_applied,
+        violations=violations,
+        scanned_path=scanned_path,
+    )
 
 
 def _render_pdf(
@@ -656,9 +902,18 @@ def _render_pdf(
     packs: list[dict[str, Any]],
     merkle: SignedMerkleRoot,
     sample_mode: bool,
+    model_attestation: "ModelAttestation",
+    invariant_report: "AuditInvariantReport",
 ) -> bytes:
     """Render the 6-page RIA PDF and return the bytes."""
     buf = io.BytesIO()
+    # The footer's "Signed by ..." stamp must agree with the page-6
+    # attestation block (R-2). The RIA itself is always ed25519-signed
+    # over the FINAL PDF bytes (the .sig file written next to the PDF
+    # holds the binding signature); ``ria_is_signed`` is therefore True
+    # in every code path that reaches _render_pdf. We pass it explicitly
+    # so the footer + page 6 read from the same boolean.
+    ria_is_signed = True
     header_ctx = RIAHeaderContext(
         fleet_id=fleet_id,
         ria_id=ria_id,
@@ -666,6 +921,7 @@ def _render_pdf(
         signer_key_id=signer_key_id,
         reef_version=REEF_VERSION,
         is_sample=sample_mode,
+        ria_is_signed=ria_is_signed,
     )
     doc = RIADocTemplate(buf, header_ctx)
     styles = build_stylesheet()
@@ -718,7 +974,21 @@ def _render_pdf(
             merkle_signed=merkle.signed,
             ria_signature_hex_short=signed.signature_hex_short,
             ria_signature_b64_short=signed.signature_b64_short,
+            ria_is_signed=ria_is_signed,
             signer_key_id=signer_key_id,
+            underwriter_score=score,
+            model_attestation_rows=model_attestation.as_table_rows(),
+            invariant_violations=[
+                {
+                    "event_id": v.event_id,
+                    "bundle_id": v.bundle_id,
+                    "timestamp_iso": v.timestamp_iso,
+                    "reason": v.reason,
+                }
+                for v in invariant_report.violations
+            ],
+            invariant_scanned_event_count=invariant_report.scanned_event_count,
+            invariant_draft_applied_event_count=invariant_report.draft_applied_event_count,
         )
     )
 
@@ -760,11 +1030,16 @@ def ensure_sample_ria(
 
     # When the caller didn't pass a signer, build the public sample-signer
     # so the committed artifact's verifier (.pub) stays stable across
-    # builds. The private key lives in a gitignored ``.keys/`` subdir so
-    # re-running the boot helper reuses the same signer rather than
-    # rotating on every build.
+    # builds. BOTH halves of the keypair are committed for the sample so
+    # any auditor can offline-verify the committed ``sample-ria.pdf``
+    # without trusting a server roundtrip. The committed
+    # ``samples/sample-signer.key`` is clearly marked demo-only — the
+    # operator's runtime signer is a separate path
+    # (``REEF_QUOTE_SIGNER_PRIV_KEY``) per .env.example. Phase B round 1
+    # (R-1) replaced the prior gitignored-.keys/ design that produced
+    # signature drift between committed PDF + .sig + .pub.
     sample_signer = signer or RIASigner(
-        priv_key_path=str(samples_dir / ".keys" / "sample-signer.key"),
+        priv_key_path=str(samples_dir / "sample-signer.key"),
         pub_key_path=str(samples_dir / "sample-signer.pub"),
         signer_key_id="reef-sample-signer",
     )
@@ -780,7 +1055,11 @@ def ensure_sample_ria(
         atlas_payload_override=_stub_atlas_payload(),
         policy_bus_payload_override=_stub_policy_bus_payload("prod-fleet"),
         dast_a_payload_override=_stub_dast_a_payload(),
-        merkle_override=_sample_merkle_root(),
+        merkle_override=_sample_merkle_root(signer=sample_signer),
+        # The committed sample never reads a live audit JSONL — pass an
+        # empty event list so the audit-invariant scan reports zero
+        # violations (and zero events scanned) deterministically.
+        policy_bus_audit_override=[],
         force_sample_mode=True,
         fallback_on_data_source_error=True,
     )
@@ -794,14 +1073,31 @@ def ensure_sample_ria(
     return dataclasses.replace(artifact, pdf_path=target, sig_path=sig_target)
 
 
-def _sample_merkle_root() -> SignedMerkleRoot:
+def _sample_merkle_root(*, signer: Optional[RIASigner] = None) -> SignedMerkleRoot:
     """Deterministic root for the committed sample RIA.
 
     Hashes a fixed string so the sample's audit-attestation page renders
     a non-empty root that's clearly stable across re-renders.
+
+    When ``signer`` is supplied (the boot path for the public sample
+    artifact), the merkle root is ALSO ed25519-signed by that signer so
+    page 6's audit-attestation block shows a real base64 signature next
+    to ``Signed: yes`` rather than the prior "(unsigned — operator did
+    not attach a signer key)" message. This is half of R-2 — the other
+    half is page 6 + the footer agreeing on the RIA's own signed status.
     """
     fixed = b"reef-sample-merkle-root-2026-05-18"
     root_hex = hashlib.sha256(fixed).hexdigest()
+    if signer is not None:
+        merkle_sig = signer.sign_pdf_bytes(fixed)
+        return SignedMerkleRoot(
+            root_hex=root_hex,
+            signature_b64=merkle_sig.signature_b64,
+            count=4321,
+            timestamp_iso="2026-05-18T00:00:00Z",
+            signed=True,
+            dir="<sample — committed audit log snapshot>",
+        )
     return SignedMerkleRoot(
         root_hex=root_hex,
         signature_b64="",
@@ -815,8 +1111,14 @@ def _sample_merkle_root() -> SignedMerkleRoot:
 __all__ = [
     "RIAArtifact",
     "RIAGenerateOptions",
+    "ModelAttestation",
+    "AuditInvariantViolation",
+    "AuditInvariantReport",
     "SampleUnderwriterAgent",
     "generate_ria",
     "ensure_sample_ria",
+    "build_model_attestation",
+    "scan_audit_for_invariants",
     "SAMPLE_RIA_RELATIVE_PATH",
+    "REEF_VERSION",
 ]

@@ -24,6 +24,13 @@ class RIAHeaderContext:
 
     Stored on the doc template so the canvas callback can pull it without
     reaching back into the section flowables.
+
+    ``ria_is_signed`` drives the footer stamp ("Signed by ..." vs
+    "Unsigned demo build") per Phase B round 1 R-2 — the footer must
+    agree with the page-6 audit-attestation block. Today every code
+    path through :func:`generate_ria` produces a signed RIA, so this
+    defaults to True; the field exists so future operator builds that
+    deliberately skip signing render an honest "unsigned" footer.
     """
 
     fleet_id: str
@@ -32,6 +39,7 @@ class RIAHeaderContext:
     signer_key_id: str
     reef_version: str
     is_sample: bool
+    ria_is_signed: bool = True
     sample_watermark_text: str = (
         "SAMPLE — generated without live Gemini API key. "
         "Live RIAs include real Munich Re-rubric-grounded Gemini Pro scoring."
@@ -142,9 +150,16 @@ def _draw_footer(canv: Canvas, ctx: RIAHeaderContext, *, page_num: int) -> None:
     text_y = st.PAGE_MARGIN_B + 0.05 * inch
     canv.setFillColor(st.COLOR_INK_MUTED)
     canv.setFont("Helvetica", 7.5)
+    # R-2: footer + page-6 attestation must agree on signed status. The
+    # footer reads "Signed by <kid>" if and only if the RIA itself is
+    # ed25519-signed; otherwise it reads "Unsigned demo build".
+    if ctx.ria_is_signed:
+        signed_text = f"Signed by {ctx.signer_key_id}"
+    else:
+        signed_text = "Unsigned demo build"
     left = (
         f"Generated {ctx.generated_at.strftime('%Y-%m-%d %H:%M UTC')}  ·  "
-        f"Signed by {ctx.signer_key_id}"
+        f"{signed_text}"
     )
     canv.drawString(st.PAGE_MARGIN_L, text_y, left)
 
