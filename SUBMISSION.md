@@ -71,11 +71,14 @@ https://github.com/Yashash4/reef-mcp-registry
 
 ## Application URL
 
-http://[deployment-url]:3000
+**https://reef-mcp-registry.vercel.app**
 
-Once the operator deploys Reef somewhere reachable (Fly / Railway / a
-public VM), this is the URL judges click through to. Locally it is
-http://localhost:3000 after `docker compose up`.
+Live preview deployed on Vercel — backed by realistic mock data with a
+sticky DEMO MODE banner. The signed sample RIA PDF is downloadable
+directly from the live page (`/samples/sample-ria.pdf`) and verifies
+offline against the committed public key. Full source, signed artifacts,
+and reproducible benchmarks in the GitHub repo. Locally,
+`docker compose up` brings every backend service online for live numbers.
 
 ## Submission deadline
 

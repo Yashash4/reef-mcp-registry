@@ -41,7 +41,8 @@ Verified against [4 named attack packs](./reef/control-plane/dast_a/app/packs/se
 | | |
 |---|---|
 | 5-min demo video | *Coming soon — Phase C Remotion video* |
-| Sample signed RIA PDF | [`reef/control-plane/quote/samples/sample-ria.pdf`](./reef/control-plane/quote/samples/sample-ria.pdf) |
+| **Live preview (DEMO MODE)** | **https://reef-mcp-registry.vercel.app** |
+| Sample signed RIA PDF | [`reef/control-plane/quote/samples/sample-ria.pdf`](./reef/control-plane/quote/samples/sample-ria.pdf) · also downloadable from the live preview at `/samples/sample-ria.pdf` |
 | Public Safety Page (after `docker compose up`) | http://localhost:3000 |
 | TechEx 2026 hackathon | https://lablab.ai/ai-hackathons/techex-intelligent-enterprise-solutions-hackathon |
 | Public submission materials | [`SUBMISSION.md`](./SUBMISSION.md) |
