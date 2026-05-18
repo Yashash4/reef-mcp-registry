@@ -293,7 +293,7 @@ MIT. See [LICENSE](./LICENSE) at the repo root.
 
 <div align="center">
 
-**Built for TechEx 2026** · Track 1: Agent Security & AI Governance (Veea) · Also eligible for the Gemini Award (cross-track Gemini usage)
+**Built to win TechEx 2026** · Track 1: Agent Security & AI Governance (Veea) · Cross-track theme: Gemini
 Author: **[Yashash Sheshagiri](https://github.com/Yashash4)** · Repo: [Yashash4/reef-mcp-registry](https://github.com/Yashash4/reef-mcp-registry)
 
 </div>

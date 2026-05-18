@@ -59,8 +59,8 @@ export function HeroStrip({ className }: HeroStripProps) {
 
         <div className="mt-8 flex flex-wrap gap-2">
           <Badge variant="emerald">TechEx 2026</Badge>
-          <Badge variant="cyan">Track 1 · Veea + Gemini Award eligible</Badge>
-          <Badge variant="amber">v0.1.0 — WIP</Badge>
+          <Badge variant="cyan">Track 1 · Veea + Gemini theme</Badge>
+          <Badge variant="amber">v0.1.0 · live</Badge>
         </div>
       </div>
     </section>
