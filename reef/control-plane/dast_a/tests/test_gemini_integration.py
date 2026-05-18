@@ -230,7 +230,7 @@ class TestRedTeamRoute:
         # No factory override → the default GoogleGenAIProClient kicks in,
         # which checks GEMINI_API_KEY immediately.
         monkeypatch.delenv("GEMINI_API_KEY", raising=False)
-        monkeypatch.setenv("GEMINI_PRO_MODEL", "gemini-2.0-pro-exp")
+        monkeypatch.setenv("GEMINI_PRO_MODEL", "gemini-2.5-pro")
         app = create_app()
         with TestClient(app) as tc:
             resp = tc.post(

@@ -146,7 +146,7 @@ def _make_inputs() -> dict[str, Any]:
     return {
         "ai_bom": {
             "agents": ["copilot-clone"],
-            "models": ["gemini-2.0-flash-exp"],
+            "models": ["gemini-2.5-flash"],
             "mcp_servers": [{"name": "victim-mcp-server", "signed": True}],
             "tools": ["summarize_inbox", "fetch_url"],
             "policy_versions": ["v1.0"],

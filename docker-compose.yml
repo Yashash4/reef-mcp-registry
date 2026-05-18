@@ -103,8 +103,8 @@ services:
       - REEF_DAST_A_USE_STUB_VICTIM=1
       - REEF_VICTIM_URL=http://victim:3001
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
-      - GEMINI_PRO_MODEL=${GEMINI_PRO_MODEL:-gemini-2.0-pro-exp}
-      - GEMINI_FLASH_MODEL=${GEMINI_FLASH_MODEL:-gemini-2.0-flash-exp}
+      - GEMINI_PRO_MODEL=${GEMINI_PRO_MODEL:-gemini-2.5-pro}
+      - GEMINI_FLASH_MODEL=${GEMINI_FLASH_MODEL:-gemini-2.5-flash}
       - REEF_PLAYWRIGHT_HEADED=${REEF_PLAYWRIGHT_HEADED:-false}
       - REEF_GEMINI_RED_MAX_ROUNDS=${REEF_GEMINI_RED_MAX_ROUNDS:-5}
     ports:
@@ -143,7 +143,7 @@ services:
       - REEF_POLICY_BUS_ADMIN_URL=http://policy-bus:50052
       - REEF_DAST_A_URL=http://dast-a:8083
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
-      - GEMINI_PRO_MODEL=${GEMINI_PRO_MODEL:-gemini-2.0-pro-exp}
+      - GEMINI_PRO_MODEL=${GEMINI_PRO_MODEL:-gemini-2.5-pro}
       - REEF_UNDERWRITER_COVERAGE_AMOUNT_USD=${REEF_UNDERWRITER_COVERAGE_AMOUNT_USD:-5000000}
     ports:
       - "8082:8082"
@@ -183,7 +183,7 @@ services:
       - PORT=3001
       - HOSTNAME=0.0.0.0
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
-      - GEMINI_FLASH_MODEL=${GEMINI_FLASH_MODEL:-gemini-2.0-flash-exp}
+      - GEMINI_FLASH_MODEL=${GEMINI_FLASH_MODEL:-gemini-2.5-flash}
     ports:
       - "3001:3001"
     healthcheck:

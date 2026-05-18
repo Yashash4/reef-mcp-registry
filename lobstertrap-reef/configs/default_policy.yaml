@@ -65,8 +65,8 @@ reef:
   # Flash drives the blue-team observer. Resolution order at runtime:
   # env var → policy default below.
   gemini:
-    pro_model: "${GEMINI_PRO_MODEL:-gemini-2.0-pro-exp}"
-    flash_model: "${GEMINI_FLASH_MODEL:-gemini-2.0-flash-exp}"
+    pro_model: "${GEMINI_PRO_MODEL:-gemini-2.5-pro}"
+    flash_model: "${GEMINI_FLASH_MODEL:-gemini-2.5-flash}"
 
   # A-9/A-10 Reef Quote (Underwriter Layer). Munich-Re-grounded scorer.
   # rubric_path can override the in-package copy of the framework markdown.
