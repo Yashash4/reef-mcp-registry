@@ -109,3 +109,4 @@ reef/control-plane/quote/samples/.working/
 
 # Upstream Lobster Trap clone (read-only reference, not committed; A-3 will fork into lobstertrap-reef/)
 lobstertrap-upstream/
+scratch/
