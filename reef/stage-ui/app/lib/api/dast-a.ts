@@ -62,7 +62,7 @@ export interface DastARunResponse {
 }
 
 /** Deterministic mock run summary — matches the "78 / 78 attempt-episodes
- *  blocked" line from SUBMISSION.md. */
+ *  blocked" line from the README receipts table. */
 const MOCK_DAST_A_RUN: DastARunResponse = {
   run_handle: "dast-a-run-26051812-demo",
   episodes_completed: 5,

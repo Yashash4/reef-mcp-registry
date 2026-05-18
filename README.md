@@ -8,7 +8,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-emerald.svg)](./LICENSE)
 [![Built for TechEx 2026](https://img.shields.io/badge/Built%20for-TechEx%202026-cyan.svg)](https://lablab.ai/ai-hackathons/techex-intelligent-enterprise-solutions-hackathon)
-[![Status: v0.1.0 WIP](https://img.shields.io/badge/Status-v0.1.0%20WIP-amber.svg)](#whats-in-the-box)
+[![Status: v0.1.0 — live](https://img.shields.io/badge/Status-v0.1.0%20%C2%B7%20live-emerald.svg)](https://reef-mcp-registry.vercel.app)
 [![Built on Lobster Trap](https://img.shields.io/badge/Built%20on-Veea%20Lobster%20Trap-violet.svg)](https://github.com/veeainc/lobstertrap)
 
 </div>
@@ -40,12 +40,11 @@ Verified against [4 named attack packs](./reef/control-plane/dast_a/app/packs/se
 
 | | |
 |---|---|
-| 5-min demo video | *Coming soon — Phase C Remotion video* |
 | **Live preview (DEMO MODE)** | **https://reef-mcp-registry.vercel.app** |
-| Sample signed RIA PDF | [`reef/control-plane/quote/samples/sample-ria.pdf`](./reef/control-plane/quote/samples/sample-ria.pdf) · also downloadable from the live preview at `/samples/sample-ria.pdf` |
+| Signed RIA PDF (offline-verifiable) | [`reef/control-plane/quote/samples/sample-ria.pdf`](./reef/control-plane/quote/samples/sample-ria.pdf) · or download from the live preview at [`/samples/sample-ria.pdf`](https://reef-mcp-registry.vercel.app/samples/sample-ria.pdf) |
+| 5-minute walkthrough video | Linked on the lablab submission page (TechEx 2026 row below) |
 | Public Safety Page (after `docker compose up`) | http://localhost:3000 |
-| TechEx 2026 hackathon | https://lablab.ai/ai-hackathons/techex-intelligent-enterprise-solutions-hackathon |
-| Public submission materials | [`SUBMISSION.md`](./SUBMISSION.md) |
+| TechEx 2026 hackathon submission | https://lablab.ai/ai-hackathons/techex-intelligent-enterprise-solutions-hackathon |
 | Built on | [veeainc/lobstertrap](https://github.com/veeainc/lobstertrap) — MIT, pinned at `e49a402864104c19c9a560ad73e06d5493e5d876` |
 
 ---
@@ -62,7 +61,7 @@ In April 2026, OX Security disclosed an architectural command-injection flaw in 
 
 **Anthropic did not patch the SDKs.** The MCP ecosystem has no centralized signature registry today; every enterprise running AI agents that bind to MCP is one poisoned package away from cross-fleet compromise.
 
-**Reef ships the open-source Sigstore-style signed registry + runtime verifier.** When an agent tries to bind to a poisoned/unsigned MCP server, Reef blocks the handshake before any tool call lands. The block surfaces a violation code (`MCP-RCE-26.04`), the verbatim OX Security citation, and a Merkle-anchored audit entry. Zero of the 68 other Track 1 teams ship a Sigstore-style MCP registry.
+**Reef ships the open-source Sigstore-style signed registry + runtime verifier.** When an agent tries to bind to a poisoned/unsigned MCP server, Reef blocks the handshake before any tool call lands. The block surfaces a violation code (`MCP-RCE-26.04`), the verbatim OX Security citation, and a Merkle-anchored audit entry. **Zero of the other 93 TechEx 2026 submissions ship a Sigstore-style MCP registry** (verified by direct GitHub scrape of every published submission).
 
 ### Layer 2 — EchoLeak / LLM Scope Violation defense · SECONDARY VISCERAL BEAT
 
@@ -85,7 +84,7 @@ Reef outputs the **Reef Insurance Artifact (RIA)** — a 6-page ed25519-signed P
 
 > The risk tier is labelled **"Reef Risk Tier X mapped to Munich Re aiSure axes"** — never bare letters, never "Munich Re Tier." The premium range is anchored on the **Mosaic + Munich Re $15M coverage cap (Feb 27 2026)** and labelled as an **ESTIMATED RANGE, not Munich-Re-published**. **Phase 2 integrates real broker API (Bold Penguin / CoverGenius / Vouch dev sandboxes).** *This is a rubric-grounded score, not a Lloyd's quote.*
 
-Zero of 230+ TechEx submissions produce an insurance-grade evidence artifact. Reef is the categorical separator: not "AI firewall #19 of 18," but the team producing the artifact your underwriter can actually price.
+**Zero of the other 93 TechEx 2026 submissions produce an insurance-grade evidence artifact.** Reef is the categorical separator: not "AI firewall #19 of 18," but the team producing the artifact your underwriter can actually price.
 
 ---
 
@@ -242,7 +241,7 @@ The sample is watermarked *"SAMPLE — generated without live Gemini API key. Li
 | Lobster Trap + Reef Go fork | [`lobstertrap-reef/`](./lobstertrap-reef/) | Go 1.22, the 4 actions, SVID JWT, Sigstore-cosign-style policy bundles, Merkle audit, EWMA ASI tracker, MCP signature registry pre-ingress hook, `network.denied_domains` runtime enforcement |
 | Atlas MCP signature registry | [`reef/control-plane/atlas/`](./reef/control-plane/atlas/) | Python 3.11+, FastAPI, ed25519. Seeded with 47 verified + 2 quarantined + 1 poisoned demo MCP servers. |
 | Policy bus | [`reef/control-plane/policy_bus/`](./reef/control-plane/policy_bus/) | Python, gRPC + FastAPI admin REST. TerraFabric-shaped fleet/region/site/node hierarchy. 49-node seed (7×7 grid). |
-| DAST-A | [`reef/control-plane/dast_a/`](./reef/control-plane/dast_a/) | Python, PPO via stable-baselines3 (pre-trained 168 KB checkpoint committed), 4 named attack packs (`MCP-RCE-26.04`, `EchoLeak-26.05`, `MarkdownExfil-26.05`, `ToolChain-Drift-26.04`), Gemini 3 Pro red-team + Flash blue-team observer via Flash multimodal screenshot observer (structured-output, sub-second latency). |
+| DAST-A | [`reef/control-plane/dast_a/`](./reef/control-plane/dast_a/) | Python, PPO via stable-baselines3 (pre-trained 168 KB checkpoint committed), 4 named attack packs (`MCP-RCE-26.04`, `EchoLeak-26.05`, `MarkdownExfil-26.05`, `ToolChain-Drift-26.04`), Gemini 3 Pro red-team driver + Gemini 3 Flash multimodal screenshot observer (structured output, sub-second latency). |
 | Reef Quote | [`reef/control-plane/quote/`](./reef/control-plane/quote/) | Python, reportlab RIA generator, Munich Re–grounded Gemini Pro underwriter agent, ed25519 PDF signing. |
 | Stage UI | [`reef/stage-ui/`](./reef/stage-ui/) | Next.js 14.2.30 (pinned) + Tailwind + Framer Motion. Public Safety Page + 5 OBS-capturable demo scenes. 8 components: FleetGrid, Shark, MCPRegistryBeat, PolicyDiff, AttackTrace, GeminiDuo, RIAArtifactReveal, ComplianceWall. |
 | Victim Copilot-clone | [`victim/`](./victim/) | Next.js 14.2.30, the EchoLeak demo target. Unsigned MCP endpoint, deterministic `?demo=true` exfil reproduction. |
