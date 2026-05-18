@@ -252,8 +252,13 @@ def draw_top_panel(img: Image.Image) -> None:
         outline=BORDER,
         width=2,
     )
-    # "Server" stack glyph
-    for i in range(3):
+    # "Server" stack glyph — package name on the left, version right-aligned.
+    server_rows = [
+        ("com.anthropic/server-fs", "v1.2.0"),
+        ("io.github.modelctxp/...", "v0.6.3"),
+        ("com.attacker-example/evil", "v0.5.0"),
+    ]
+    for i, (pkg_name, version) in enumerate(server_rows):
         sy = icon_y + 24 + i * 36
         draw.rounded_rectangle(
             (icon_x + 32, sy, icon_x + icon_w - 32, sy + 24),
@@ -265,19 +270,39 @@ def draw_top_panel(img: Image.Image) -> None:
         # Status LED — bottom row red (the poisoned one), others cyan
         led_color = RED if i == 2 else CYAN
         draw.ellipse((icon_x + 48, sy + 8, icon_x + 58, sy + 18), fill=led_color)
+        text_fill = TEXT_2 if i < 2 else RED
+        # Package name — left-aligned just right of the LED
         draw.text(
             (icon_x + 70, sy + 1),
-            ["com.anthropic/server-fs    v1.2.0", "io.github.modelctxp/...    v0.6.3", "com.attacker-example/evil 0.5.0"][i],
+            pkg_name,
             font=F_MONO_SM,
-            fill=TEXT_2 if i < 2 else RED,
+            fill=text_fill,
+        )
+        # Version — right-aligned so all three versions line up in a column
+        ver_bbox = F_MONO_SM.getbbox(version)
+        ver_w = ver_bbox[2] - ver_bbox[0]
+        ver_x = icon_x + icon_w - 40 - ver_w
+        draw.text(
+            (ver_x, sy + 1),
+            version,
+            font=F_MONO_SM,
+            fill=text_fill,
         )
 
-    # Signature-fail X over the bottom (poisoned) row
-    cx = icon_x + icon_w + 10
-    cy = icon_y + icon_h - 22
-    draw.ellipse((cx - 22, cy - 22, cx + 22, cy + 22), fill=RED, outline=(120, 0, 0), width=2)
-    draw.line((cx - 9, cy - 9, cx + 9, cy + 9), fill=TEXT, width=4)
-    draw.line((cx + 9, cy - 9, cx - 9, cy + 9), fill=TEXT, width=4)
+    # Signature-fail X — INSIDE the panel on the attacker row's right edge,
+    # acting as a deny indicator (not a free-floating badge outside the panel).
+    attacker_row_y = icon_y + 24 + 2 * 36  # i=2 row
+    cx = icon_x + icon_w - 16
+    cy = attacker_row_y + 12
+    badge_r = 11
+    draw.ellipse(
+        (cx - badge_r, cy - badge_r, cx + badge_r, cy + badge_r),
+        fill=RED,
+        outline=(120, 0, 0),
+        width=2,
+    )
+    draw.line((cx - 5, cy - 5, cx + 5, cy + 5), fill=TEXT, width=3)
+    draw.line((cx + 5, cy - 5, cx - 5, cy + 5), fill=TEXT, width=3)
 
 
 def draw_middle_panel(img: Image.Image) -> None:
