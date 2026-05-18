@@ -183,10 +183,15 @@ def draw_top_panel(img: Image.Image) -> None:
     halo = halo.filter(ImageFilter.GaussianBlur(radius=70))
     img.paste(halo, (px, py), halo)
 
-    # Chip at top-left of the panel
-    chip(draw, px + 32, py + 24, "PRIMARY HEADLINE", color=RED)
-    chip(draw, px + 254, py + 24, "MCP SUPPLY CHAIN", color=CYAN)
-    chip(draw, px + 480, py + 24, "ANTHROPIC MCP STDIO", color=VIOLET)
+    # Chip at top-left of the panel — positions computed dynamically so
+    # long labels don't get overlapped by the next chip's rounded rect.
+    chip_x = px + 32
+    chip_gap = 16
+    w1, _ = chip(draw, chip_x, py + 24, "PRIMARY HEADLINE", color=RED)
+    chip_x += w1 + chip_gap
+    w2, _ = chip(draw, chip_x, py + 24, "MCP SUPPLY CHAIN", color=CYAN)
+    chip_x += w2 + chip_gap
+    chip(draw, chip_x, py + 24, "ANTHROPIC MCP STDIO", color=VIOLET)
 
     # Big BIND DENIED headline
     draw.text(
@@ -297,10 +302,14 @@ def draw_middle_panel(img: Image.Image) -> None:
     halo = halo.filter(ImageFilter.GaussianBlur(radius=80))
     img.paste(halo, (px, py), halo)
 
-    # Chip
-    chip(draw, px + 32, py + 24, "49-NODE FLEET", color=EMERALD)
-    chip(draw, px + 220, py + 24, "SIGNED POLICY BUNDLE v4", color=CYAN)
-    chip(draw, px + 552, py + 24, "MID-FLIGHT  *  3.8s / 49 NODES", color=AMBER)
+    # Chip row — positions computed dynamically per chip width.
+    chip_x = px + 32
+    chip_gap = 16
+    w1, _ = chip(draw, chip_x, py + 24, "49-NODE FLEET", color=EMERALD)
+    chip_x += w1 + chip_gap
+    w2, _ = chip(draw, chip_x, py + 24, "SIGNED POLICY BUNDLE v4", color=CYAN)
+    chip_x += w2 + chip_gap
+    chip(draw, chip_x, py + 24, "MID-FLIGHT  *  3.8s / 49 NODES", color=AMBER)
 
     # 7x7 grid
     grid_size = 7
@@ -433,10 +442,13 @@ def draw_bottom_panel(img: Image.Image) -> None:
     draw.rectangle((pdf_x + 96, sig_y, pdf_x + pdf_w - 16, sig_y + 4), fill=(13, 71, 79))
     draw.rectangle((pdf_x + 96, sig_y + 8, pdf_x + pdf_w - 60, sig_y + 12), fill=(150, 145, 135))
 
-    # Headline copy on the right
+    # Headline copy on the right — chip positions computed dynamically.
     rx = px + 32 + pdf_w + 40
-    chip(draw, rx, py + 24, "REEF INSURANCE ARTIFACT", color=AMBER)
-    chip(draw, rx + 360, py + 24, "ED25519 SIGNED", color=EMERALD)
+    chip_x = rx
+    chip_gap = 16
+    w1, _ = chip(draw, chip_x, py + 24, "REEF INSURANCE ARTIFACT", color=AMBER)
+    chip_x += w1 + chip_gap
+    chip(draw, chip_x, py + 24, "ED25519 SIGNED", color=EMERALD)
 
     draw.text(
         (rx, py + 76),
