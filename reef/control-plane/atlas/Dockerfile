@@ -11,8 +11,10 @@ COPY pyproject.toml /app/pyproject.toml
 COPY app /app/app
 COPY README.md /app/README.md
 
-RUN pip install --no-cache-dir -U pip && \
-    pip install --no-cache-dir -e ".[dev]"
+# Use the stock pip shipped with python:3.12-slim. Upgrading to pip-26+
+# pulls a release that silently corrupts wheel installs to zero-byte
+# Python files in this image registry — see commit fixing policy-bus.
+RUN pip install --no-cache-dir -e ".[dev]"
 
 EXPOSE 8080
 
