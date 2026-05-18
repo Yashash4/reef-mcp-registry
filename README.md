@@ -83,7 +83,7 @@ Reef outputs the **Reef Insurance Artifact (RIA)**, a 6-page ed25519-signed PDF 
 - DAST-A attack pack catalog with OX Security verbatim citations
 - A Gemini 3 Pro-generated risk tier and premium range grounded on **Munich Re's public AI insurance framework**
 
-> The risk tier is labelled **"Reef Risk Tier X mapped to Munich Re aiSure axes"** (never bare letters, never "Munich Re Tier"). The premium range is anchored on the **Mosaic + Munich Re $15M coverage cap (Feb 27 2026)** and labelled as an **ESTIMATED RANGE, not Munich-Re-published**. **Phase 2 integrates real broker API (Bold Penguin, CoverGenius, Vouch dev sandboxes).** *This is a rubric-grounded score, not a Lloyd's quote.*
+> The risk tier is labelled **"Reef Risk Tier X mapped to Munich Re aiSure axes"** (never bare letters, never "Munich Re Tier"). aiSure is 5 risk categories (hallucination, bias, privacy, IP, performance) by 5 due-diligence axes (data-science process, statistical testing, predictive robustness, scope of validity, performance distribution), loaded verbatim into the Gemini 3 Pro system prompt. The premium range is anchored on the **Mosaic + Munich Re $15M coverage cap (Feb 27 2026)** and labelled as an **ESTIMATED RANGE, not Munich-Re-published**. **Phase 2 integrates real broker API (Bold Penguin, CoverGenius, Vouch dev sandboxes).** *This is a rubric-grounded score, not a Lloyd's quote.*
 
 **Zero of the other 93 TechEx 2026 submissions produce an insurance-grade evidence artifact.** Reef is the categorical separator: not "AI firewall #19 of 18," but the team producing the artifact your underwriter can actually price.
 
@@ -293,7 +293,7 @@ MIT. See [LICENSE](./LICENSE) at the repo root.
 
 <div align="center">
 
-**Built for TechEx 2026** · Track 1, Agent Security & AI Governance (Veea) · Secondary prize target: Gemini Award
+**Built for TechEx 2026** · Track 1: Agent Security & AI Governance (Veea) · Also eligible for the Gemini Award (cross-track Gemini usage)
 Author: **[Yashash Sheshagiri](https://github.com/Yashash4)** · Repo: [Yashash4/reef-mcp-registry](https://github.com/Yashash4/reef-mcp-registry)
 
 </div>
