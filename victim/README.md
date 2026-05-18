@@ -18,15 +18,19 @@ pnpm install
 GEMINI_API_KEY=… pnpm dev   # http://localhost:3001
 ```
 
-`GEMINI_API_KEY` is required for the **live** path. The **demo** path
-(`/?demo=true`) is deterministic and runs without a key.
+`GEMINI_API_KEY` **and** `GEMINI_FLASH_MODEL` are required for the **live** path.
+The **demo** path (`/?demo=true`) is deterministic and runs without either.
 
 Environment variables read:
 
-| Var                 | Default                  | Purpose                            |
-| ------------------- | ------------------------ | ---------------------------------- |
-| `GEMINI_API_KEY`    | —                        | Required for live Gemini call      |
-| `GEMINI_PRO_MODEL`  | `gemini-2.0-flash-exp`   | Override the model used            |
+| Var                  | Default          | Purpose                                                    |
+| -------------------- | ---------------- | ---------------------------------------------------------- |
+| `GEMINI_API_KEY`     | —                | Required for live Gemini call (live path only)             |
+| `GEMINI_FLASH_MODEL` | —                | Required for live Gemini call. Per D-017 the victim Copilot uses Gemini Flash (speed > depth); the underwriter is the only Pro surface. The repo-root `.env.example` defaults to `gemini-2.5-flash`. Model identifier MUST come from env — never hardcoded. |
+
+When `GEMINI_FLASH_MODEL` is missing, the live route returns HTTP 503 with
+`{"error": "MISSING_GEMINI_FLASH_MODEL", ...}` — identical fail-closed
+shape to the existing missing-API-key path.
 
 ## Two demo paths
 

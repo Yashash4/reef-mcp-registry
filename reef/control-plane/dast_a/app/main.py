@@ -55,6 +55,8 @@ async def lifespan(app: FastAPI):
                 "[dast-a] seeded %d attack packs into %s", inserted, data_dir
             )
 
+    from app.agent.session_store import RedTeamSessionStore
+
     app.state.auditor = auditor
     app.state.catalog = catalog
     app.state.drafts = drafts
@@ -65,6 +67,11 @@ async def lifespan(app: FastAPI):
     )
     app.state.default_use_stub = (
         os.environ.get("REEF_DAST_A_USE_STUB_VICTIM", "0") == "1"
+    )
+    # Bounded in-memory store of recent Gemini-Pro red-team sessions so the
+    # `/dast-a/red-team/sessions/{id}/screenshots` endpoint can replay them.
+    app.state.gemini_sessions = RedTeamSessionStore(
+        max_sessions=int(os.environ.get("REEF_GEMINI_SESSION_CACHE_SIZE", "16"))
     )
     yield
     webhook.close()

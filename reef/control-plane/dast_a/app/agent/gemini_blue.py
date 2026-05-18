@@ -1,33 +1,40 @@
-"""Gemini 3 Flash blue-team observer — Live-API-streaming policy drafter.
+"""Gemini Flash blue-team observer — structured-output policy drafter.
 
 Watches a stream of DAST-A trace events as they happen (PPO episodes,
 Gemini-red rounds, or the JSONL audit-log tail). For each event the
-observer emits one or more structured policy-draft suggestions in
-sub-second latency. Drafts are pushed straight into A-8's existing
-:class:`app.review.DraftStore` so the operator gates approval — never
-auto-applied (per D-018 / D-004 advisory-only rule).
+observer emits one or more structured policy-draft suggestions. Drafts
+are pushed straight into A-8's existing :class:`app.review.DraftStore`
+so the operator gates approval — never auto-applied (per D-018 / D-004
+advisory-only rule).
 
 The wire shape mirrors A-8's :class:`PolicyDraft` so the existing
 ``/dast-a/review-queue`` endpoint surfaces blue-team output identically
 to PPO-discovered drafts.
 
-Design notes:
+Design notes (honest framing — POV-2 audit, 2026-05-18):
 
-* The Live API is the goal — `google.genai.live.aio` streams JSON
-  partials over WebSocket. Because the SDK's connection contract differs
-  between versions we wrap it behind the :class:`GeminiFlashClient`
-  protocol so tests can plug in a deterministic fake. The production
-  implementation (:class:`GoogleGenAIFlashLiveClient`) is async-friendly
-  and degrades to a single :meth:`generate_content` call if the Live
-  bridge isn't available at runtime — both surfaces still satisfy the
-  ``AsyncIterable[PolicyDraft]`` contract.
+* This is **not** the Gemini Live API. The Live API (preview, audio /
+  video realtime sessions via ``google.genai.live.aio.connect``) does
+  not currently expose first-class enforced JSON-schema structured
+  output via ``LiveConnectConfig`` — that's a ``GenerateContentConfig``
+  feature. We need enforced structured output for PolicyDraft, so we
+  call ``client.models.generate_content`` with
+  ``response_mime_type="application/json"`` and a strict response
+  schema, wrapped in ``asyncio.to_thread`` so the async observer loop
+  stays non-blocking. The class is named
+  :class:`GoogleGenAIFlashObserverClient` to match what the code does.
+* The :class:`GeminiFlashClient` protocol lets tests plug in a
+  deterministic fake. Both the production observer and the tests
+  satisfy the ``AsyncIterable[PolicyDraft]`` contract via
+  ``stream_draft``.
 * No swallowed errors. Missing ``GEMINI_API_KEY`` raises
   :class:`MissingGeminiAPIKey`; missing ``GEMINI_FLASH_MODEL`` raises
   :class:`MissingGeminiFlashModel`; transport errors bubble as
-  :class:`GeminiCallFailed`.
-* Honest framing: drafts always carry ``advisory=True`` and the rationale
-  text explains "operator approval gated, not auto-apply" — matching the
-  Reef-wide guarantee in 10-DECISIONS.md.
+  :class:`GeminiCallFailed`. The model identifier comes from the env
+  (D-017) — no hardcoded strings.
+* Advisory-only: drafts always carry ``advisory=True`` and the
+  rationale text explains "operator approval gated, not auto-apply" —
+  matching the Reef-wide guarantee in 10-DECISIONS.md (D-018).
 """
 from __future__ import annotations
 
@@ -118,7 +125,7 @@ class PolicyDraft:
         """Render for transport to the human-review webhook."""
         return {
             "kind": "policy_draft",
-            "source": "DAST-A blue-team (Gemini Flash Live API observer)",
+            "source": "DAST-A blue-team (Gemini Flash structured-output observer)",
             "rule_id_hint": self.rule_id_hint,
             "when": self.when,
             "action": self.action,
@@ -144,7 +151,7 @@ _SYSTEM_PROMPT = (
 )
 
 
-# Response schema enforced by Gemini Flash when the Live API supports it.
+# Response schema enforced by Gemini Flash via response_mime_type=application/json.
 _RESPONSE_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
@@ -184,18 +191,27 @@ class GeminiFlashClient(Protocol):
 
 
 # ---------------------------------------------------------------------------
-# Production Gemini Flash client (Live API → falls back to generate_content)
+# Production Gemini Flash client (structured-output via generate_content)
 # ---------------------------------------------------------------------------
 
 
-class GoogleGenAIFlashLiveClient:
-    """Real Gemini Flash client.
+class GoogleGenAIFlashObserverClient:
+    """Real Gemini Flash client — structured-output policy-draft observer.
 
-    Tries to use the Live API for sub-second streaming. If the SDK build
-    available at import time doesn't expose Live (some 2.x builds gate it
-    behind a feature flag), degrades to ``generate_content`` and still
-    yields the JSON result via the same async-iterable surface. The
-    callers (observer loop) cannot tell the difference.
+    Uses ``client.models.generate_content`` with
+    ``response_mime_type="application/json"`` so Flash returns a JSON
+    PolicyDraft that conforms to ``_RESPONSE_SCHEMA``. The call is
+    wrapped in ``asyncio.to_thread`` so the async observer loop stays
+    non-blocking while the model is generating.
+
+    This intentionally does **not** use the Gemini Live API
+    (``google.genai.live.aio.connect``). The Live API is a preview-stage
+    bidirectional audio/video session surface; its ``LiveConnectConfig``
+    does not currently expose a first-class JSON-schema enforced
+    structured-output mode, and a Reef PolicyDraft is fundamentally a
+    structured artifact. POV-2 (Google PM review, 2026-05-18) flagged
+    the prior "Live API" naming as misleading — this is the honest
+    structured-output observer.
     """
 
     def __init__(
@@ -326,7 +342,7 @@ class GeminiBlueTeam:
 
     def _ensure_client(self) -> GeminiFlashClient:
         if self._flash_client is None:
-            self._flash_client = GoogleGenAIFlashLiveClient()
+            self._flash_client = GoogleGenAIFlashObserverClient()
         return self._flash_client
 
     async def start_observer(
@@ -482,6 +498,12 @@ async def trace_source_from_list(events: list[TraceEvent]) -> AsyncIterator[Trac
         yield ev
 
 
+# Back-compat alias — the prior name leaked into a few call sites
+# (notably ``app/api/gemini.py`` test scaffolding + the README). New
+# code should import :class:`GoogleGenAIFlashObserverClient`.
+GoogleGenAIFlashLiveClient = GoogleGenAIFlashObserverClient
+
+
 __all__ = [
     "GeminiBlueTeam",
     "GeminiBlueTeamError",
@@ -491,7 +513,8 @@ __all__ = [
     "TraceEvent",
     "PolicyDraft",
     "GeminiFlashClient",
-    "GoogleGenAIFlashLiveClient",
+    "GoogleGenAIFlashObserverClient",
+    "GoogleGenAIFlashLiveClient",  # deprecated alias, kept for backwards compat
     "trace_from_episode",
     "trace_from_red_round",
     "trace_source_from_list",

@@ -350,3 +350,81 @@ class TestReviewQueueIntegration:
         drafts = resp.json()
         assert len(drafts) >= 1
         assert any(d["title"].startswith("Blue-team") for d in drafts)
+
+
+# ---------------------------------------------------------------------------
+# Red-team screenshots endpoint (POV-2 multimodal-moment surfacing, R-C4)
+# ---------------------------------------------------------------------------
+
+
+class TestRedTeamScreenshotsEndpoint:
+    def test_returns_404_when_session_missing(self, client: TestClient) -> None:
+        resp = client.get("/dast-a/red-team/sessions/unknown-id/screenshots")
+        assert resp.status_code == 404
+        body = resp.json()
+        assert body["detail"]["error"] == "SESSION_NOT_FOUND"
+        assert "known_session_ids" in body["detail"]
+
+    def test_session_screenshots_round_trip(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Pin GEMINI_PRO_MODEL so the response surfaces it honestly.
+        monkeypatch.setenv("GEMINI_PRO_MODEL", "gemini-2.5-pro")
+        run_resp = client.post(
+            "/dast-a/red-team/gemini-run",
+            json={
+                "max_rounds": 3,
+                "reef_on": False,
+                "stop_on_success": False,
+                "victim_url": "http://stub.test",
+            },
+        )
+        assert run_resp.status_code == 200, run_resp.text
+        session_id = run_resp.json()["session_id"]
+
+        shots = client.get(
+            f"/dast-a/red-team/sessions/{session_id}/screenshots"
+        )
+        assert shots.status_code == 200, shots.text
+        payload = shots.json()
+        assert payload["session_id"] == session_id
+        assert payload["classifier_model_id"] == "gemini-2.5-pro"
+        assert payload["classifier_label"] == "Gemini Pro multimodal classifier"
+        assert len(payload["frames"]) == 3
+        for frame in payload["frames"]:
+            assert frame["template"] in (
+                "markdown_image",
+                "bare_url",
+                "json_tool_call",
+                "header_injection",
+            )
+            # Every frame surfaces the classifier verdict.
+            cls = frame["classification"]
+            assert isinstance(cls["succeeded"], bool)
+            assert isinstance(cls["secret_fragment_visible"], bool)
+            # `has_screenshot` reflects whether the round captured a PNG.
+            assert frame["has_screenshot"] is bool(frame["screenshot_b64"])
+
+    def test_pro_model_id_unspecified_when_env_missing(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # When the operator did not export GEMINI_PRO_MODEL we fall back to
+        # the literal string "unspecified" — the panel still renders
+        # honestly rather than guessing or hard-coding.
+        monkeypatch.delenv("GEMINI_PRO_MODEL", raising=False)
+        run_resp = client.post(
+            "/dast-a/red-team/gemini-run",
+            json={
+                "max_rounds": 1,
+                "reef_on": False,
+                "stop_on_success": False,
+                "victim_url": "http://stub.test",
+            },
+        )
+        assert run_resp.status_code == 200
+        session_id = run_resp.json()["session_id"]
+        shots = client.get(
+            f"/dast-a/red-team/sessions/{session_id}/screenshots"
+        )
+        assert shots.status_code == 200
+        assert shots.json()["classifier_model_id"] == "unspecified"

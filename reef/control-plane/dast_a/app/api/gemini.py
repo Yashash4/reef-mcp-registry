@@ -2,11 +2,20 @@
 
 * ``POST /dast-a/red-team/gemini-run`` — Run a Gemini-Pro-driven red-team
   session via Playwright. Returns a :class:`SessionResult` shaped like the
-  PPO ``RunResponse`` so the review-queue UI consumes both uniformly.
+  PPO ``RunResponse`` so the review-queue UI consumes both uniformly. The
+  most-recent completed session is cached in ``app.state.gemini_sessions``
+  so the screenshots endpoint can replay it.
+* ``GET /dast-a/red-team/sessions/{session_id}/screenshots`` — Returns the
+  Playwright screenshots captured during a red-team session together with
+  the Pro multimodal classifier verdict on each one. Surfaces the
+  "Gemini Pro multimodal classifier looking at its own attack screenshot"
+  beat on stage.
 * ``POST /dast-a/blue-team/observe`` — Server-sent event stream of blue-team
   policy drafts derived from a given ``episode_id`` or run identifier. Each
   emitted draft is also persisted to the :class:`DraftStore` so the
-  ``/dast-a/review-queue`` endpoint will surface it.
+  ``/dast-a/review-queue`` endpoint will surface it. Backed by the Flash
+  structured-output observer (not the Gemini Live API — see
+  ``gemini_blue.py`` module docstring for why).
 """
 from __future__ import annotations
 
@@ -15,7 +24,7 @@ import datetime as dt
 import logging
 import os
 import secrets
-from typing import AsyncIterator, Optional
+from typing import Any, AsyncIterator, Optional
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from fastapi.responses import StreamingResponse
@@ -216,7 +225,151 @@ def post_red_team_run(
             "novel_signatures": session.novel_signatures,
         },
     )
+    # Cache the session for the screenshots endpoint. Older sessions are
+    # evicted automatically per the LRU cap.
+    sessions = getattr(request.app.state, "gemini_sessions", None)
+    if sessions is not None:
+        sessions.add(session)
     return _session_to_response(session)
+
+
+# ---------------------------------------------------------------------------
+# Red-team screenshots — surface the Pro multimodal classifier output
+# ---------------------------------------------------------------------------
+
+
+class ScreenshotFrame(BaseModel):
+    """One captured Playwright screenshot + the Pro classifier verdict.
+
+    The classifier verdict is a strict subset of the Pro multimodal
+    response: the Stage UI's ``AttackTrace`` panel renders the booleans
+    inline so the audience can see "Pro looked at its own screenshot and
+    decided <X>".
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    round_index: int
+    captured_at: dt.datetime
+    template: str
+    host: str
+    payload_excerpt: str
+    browser_status_code: int
+    screenshot_b64: Optional[str] = Field(
+        default=None,
+        description=(
+            "Base64-encoded PNG. Omitted (None) when the Playwright run "
+            "failed to capture a screenshot for this round."
+        ),
+    )
+    has_screenshot: bool
+    classification: dict[str, Any]
+
+
+class ScreenshotsResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    session_id: str
+    started_at: dt.datetime
+    finished_at: dt.datetime
+    victim_url: str
+    reef_on: bool
+    succeeded: bool
+    classifier_model_id: str = Field(
+        description=(
+            "Model identifier the multimodal classifier ran under "
+            "(GEMINI_PRO_MODEL at session time). The Stage UI surfaces "
+            "this so the audience sees the exact model that looked at "
+            "the screenshot."
+        )
+    )
+    classifier_label: str = Field(
+        description=(
+            "Human-readable badge text for the AttackTrace caption — e.g. "
+            "'Gemini Pro multimodal classifier'."
+        )
+    )
+    frames: list[ScreenshotFrame]
+
+
+@router.get(
+    "/red-team/sessions/{session_id}/screenshots",
+    response_model=ScreenshotsResponse,
+)
+def get_red_team_session_screenshots(
+    session_id: str, request: Request
+) -> ScreenshotsResponse:
+    """Return Playwright screenshots + Pro multimodal classifier verdicts.
+
+    Source data is the in-memory :class:`SessionResult` cached by the
+    most recent ``POST /dast-a/red-team/gemini-run`` call. Returns 404
+    when the session has been evicted from the LRU.
+
+    The classifier model ID is read from ``GEMINI_PRO_MODEL`` (D-017) —
+    never hardcoded. When the env var is unset (e.g. the test fixture
+    runs without a real key) the classifier is labelled ``"unspecified"``
+    so the panel still renders honestly.
+    """
+    sessions = getattr(request.app.state, "gemini_sessions", None)
+    if sessions is None:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": "SESSION_STORE_UNAVAILABLE",
+                "message": (
+                    "Red-team session store is not initialised. Boot the "
+                    "DAST-A service via app.main.create_app() to populate it."
+                ),
+            },
+        )
+    session = sessions.get(session_id)
+    if session is None:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error": "SESSION_NOT_FOUND",
+                "message": (
+                    f"No Gemini red-team session cached under id {session_id!r}. "
+                    "Either the session was never run on this process or it "
+                    "has been evicted from the LRU cache."
+                ),
+                "known_session_ids": sessions.session_ids(),
+            },
+        )
+
+    classifier_model_id = os.environ.get("GEMINI_PRO_MODEL", "unspecified")
+    frames: list[ScreenshotFrame] = []
+    for r in session.rounds:
+        frames.append(
+            ScreenshotFrame(
+                round_index=r.round_index,
+                captured_at=session.started_at,
+                template=r.template,
+                host=r.host,
+                payload_excerpt=r.payload[:256],
+                browser_status_code=r.browser_status_code,
+                screenshot_b64=r.screenshot_b64,
+                has_screenshot=bool(r.screenshot_b64),
+                classification={
+                    "succeeded": r.exfil_succeeded,
+                    "secret_fragment_visible": r.secret_fragment_visible,
+                    "exfil_destination": r.exfil_destination,
+                    "exfil_url": r.exfil_url,
+                    "reasoning": r.reasoning,
+                },
+            )
+        )
+    return ScreenshotsResponse(
+        session_id=session.session_id,
+        started_at=session.started_at,
+        finished_at=session.finished_at,
+        victim_url=session.victim_url,
+        reef_on=session.reef_on,
+        succeeded=session.succeeded,
+        classifier_model_id=classifier_model_id,
+        classifier_label="Gemini Pro multimodal classifier",
+        frames=frames,
+    )
 
 
 # ---------------------------------------------------------------------------

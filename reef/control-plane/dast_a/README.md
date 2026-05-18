@@ -45,6 +45,15 @@ curl http://localhost:8088/dast-a/packs | jq
 
 # Review queue (drafts derived from unblocked attacks)
 curl http://localhost:8088/dast-a/review-queue | jq
+
+# Kick off a Gemini-Pro-driven red-team session (requires GEMINI_API_KEY +
+# GEMINI_PRO_MODEL set on this process)
+curl -X POST http://localhost:8088/dast-a/red-team/gemini-run \
+  -H "Content-Type: application/json" \
+  -d '{"max_rounds": 3, "reef_on": false, "stop_on_success": false}' | jq
+
+# Pull the screenshots + Pro multimodal classifier verdicts for that session
+curl http://localhost:8088/dast-a/red-team/sessions/<session_id>/screenshots | jq
 ```
 
 ## Pre-trained checkpoint
@@ -61,6 +70,28 @@ are templates the RL search found against the local victim app. They are NOT zer
 disclosures against production systems. The MCP-RCE-26.04 pack is **catalogued** by
 DAST-A using OX Security's verbatim April 2026 disclosure; it was not discovered by
 DAST-A (OX Security did).
+
+### Gemini surfaces (POV-2 honesty pass, 2026-05-18)
+
+* **`gemini_red.py`** — Gemini Pro orchestrates Playwright-driven attacks. For
+  each round Pro generates a structured-JSON payload suggestion *and* runs a
+  multimodal classifier over the captured screenshot + response text to decide
+  if the exfil landed. The model identifier comes from `GEMINI_PRO_MODEL`
+  (D-017) — never hardcoded. The screenshots + classifier verdicts are
+  surfaced to the Stage UI via the new
+  `GET /dast-a/red-team/sessions/{id}/screenshots` endpoint.
+
+* **`gemini_blue.py`** — Gemini Flash structured-output policy-draft observer.
+  This is **not** the Gemini Live API. The Live API
+  (`google.genai.live.aio.connect`) is a preview-stage bidirectional realtime
+  session surface designed for audio / video; its `LiveConnectConfig` does not
+  currently expose first-class JSON-schema-enforced structured output. A Reef
+  PolicyDraft is fundamentally a structured artifact, so the production
+  client (`GoogleGenAIFlashObserverClient`) calls
+  `client.models.generate_content` with `response_mime_type="application/json"`
+  and a strict response schema, wrapped in `asyncio.to_thread` so the
+  observer loop stays non-blocking. The model identifier comes from
+  `GEMINI_FLASH_MODEL` (D-017) — never hardcoded.
 
 ## Environment variables
 

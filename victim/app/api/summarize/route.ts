@@ -15,7 +15,10 @@ import {
 
 export const runtime = "nodejs";
 
-const DEFAULT_FLASH_MODEL = "gemini-2.0-flash-exp";
+// D-017: the victim Copilot agent uses Gemini FLASH (speed > depth for
+// summarize_inbox), NEVER hardcoded. The model identifier MUST come from
+// `GEMINI_FLASH_MODEL` (see .env.example / docs/10-DECISIONS.md D-017).
+// The Reef Quote underwriter is the only surface that uses Pro.
 
 type RequestBody = {
   /**
@@ -111,7 +114,20 @@ async function runLivePath(): Promise<NextResponse> {
     return NextResponse.json(err, { status: 503 });
   }
 
-  const modelName = process.env.GEMINI_PRO_MODEL || DEFAULT_FLASH_MODEL;
+  // D-017: read the Flash model identifier from the environment, never
+  // hardcoded. The victim Copilot is the Flash surface (speed > depth);
+  // the Reef Quote underwriter is the only Pro surface. POV-2 review
+  // (2026-05-18) flagged the prior `GEMINI_PRO_MODEL || "gemini-2.0-flash-exp"`
+  // fallback as both a D-017 violation and a Pro/Flash naming inversion.
+  const modelName = process.env.GEMINI_FLASH_MODEL;
+  if (!modelName) {
+    const err: SummarizeError = {
+      error: "MISSING_GEMINI_FLASH_MODEL",
+      detail:
+        "Set GEMINI_FLASH_MODEL in victim/.env.local (or the repo-root .env) — e.g. `GEMINI_FLASH_MODEL=gemini-2.5-flash`. Per docs/10-DECISIONS.md D-017 the victim Copilot uses Gemini Flash; model identifiers MUST come from env, never hardcoded. The demo path (?demo=true) does NOT require this var.",
+    };
+    return NextResponse.json(err, { status: 503 });
+  }
   const genAI = new GoogleGenerativeAI(apiKey);
   const model = genAI.getGenerativeModel({
     model: modelName,

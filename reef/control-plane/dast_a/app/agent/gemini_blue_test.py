@@ -327,15 +327,33 @@ class TestTraceConverters:
 class TestEnvGuards:
     def test_missing_api_key_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("GEMINI_API_KEY", raising=False)
-        from app.agent.gemini_blue import GoogleGenAIFlashLiveClient
+        from app.agent.gemini_blue import GoogleGenAIFlashObserverClient
 
         with pytest.raises(MissingGeminiAPIKey):
-            GoogleGenAIFlashLiveClient()
+            GoogleGenAIFlashObserverClient()
 
     def test_missing_flash_model_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("GEMINI_API_KEY", "stub-key-for-test")
         monkeypatch.delenv("GEMINI_FLASH_MODEL", raising=False)
-        from app.agent.gemini_blue import GoogleGenAIFlashLiveClient
+        from app.agent.gemini_blue import GoogleGenAIFlashObserverClient
 
         with pytest.raises(MissingGeminiFlashModel):
+            GoogleGenAIFlashObserverClient()
+
+    def test_legacy_live_client_alias_still_resolves(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Back-compat: the prior class name aliases to the observer client.
+
+        The rename in POV-2 (2026-05-18) keeps the old import path working
+        so any external scaffolding that imported the old name still resolves.
+        """
+        monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+        from app.agent.gemini_blue import (
+            GoogleGenAIFlashLiveClient,
+            GoogleGenAIFlashObserverClient,
+        )
+
+        assert GoogleGenAIFlashLiveClient is GoogleGenAIFlashObserverClient
+        with pytest.raises(MissingGeminiAPIKey):
             GoogleGenAIFlashLiveClient()
