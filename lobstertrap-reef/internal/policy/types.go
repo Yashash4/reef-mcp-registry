@@ -158,6 +158,49 @@ type ReefPolicy struct {
 	// TerraFabric-shaped Reef Policy Bus and hot-reloads on each verified
 	// bundle. cmd/serve.go wires this when --enable-reef is on.
 	PolicyBus ReefPolicyBus `yaml:"policy_bus,omitempty" json:"policy_bus,omitempty"`
+
+	// Gemini surfaces (A-9). Pro drives the red-team + underwriter; Flash
+	// drives the blue-team observer. The Go fork itself does not call
+	// Gemini — these fields are documentation that the Python sidecars
+	// (reef/control-plane/dast_a/, reef/control-plane/quote/) read at
+	// runtime via env vars. Carrying them in policy YAML keeps the
+	// operator surface unified.
+	Gemini ReefGemini `yaml:"gemini,omitempty" json:"gemini,omitempty"`
+
+	// Underwriter (A-9/A-10) Reef Quote configuration. Same caveat as
+	// Gemini above — the underwriter agent lives in the Python sidecar
+	// and reads env vars; this block documents the operator-facing knobs.
+	Underwriter ReefUnderwriter `yaml:"underwriter,omitempty" json:"underwriter,omitempty"`
+}
+
+// ReefGemini documents the Gemini model identifiers Reef uses across
+// sidecar surfaces. Both fields accept either a literal model name or a
+// shell-style "${ENV_VAR:-default}" placeholder; the Python sidecars
+// resolve the placeholder against os.environ at runtime.
+type ReefGemini struct {
+	// ProModel is the Gemini Pro identifier. Read by:
+	//   - reef/control-plane/dast_a (Gemini red-team driver, A-9)
+	//   - reef/control-plane/quote   (Munich-Re-grounded underwriter, A-9/A-10)
+	ProModel string `yaml:"pro_model,omitempty" json:"pro_model,omitempty"`
+	// FlashModel is the Gemini Flash identifier. Read by:
+	//   - victim/             (Copilot-clone summarizer, A-2)
+	//   - reef/control-plane/dast_a (Gemini blue-team observer, A-9)
+	FlashModel string `yaml:"flash_model,omitempty" json:"flash_model,omitempty"`
+}
+
+// ReefUnderwriter documents the operator-facing knobs for the Munich
+// Re-grounded underwriter agent (A-9/A-10). Both fields accept literal
+// values or shell-style placeholders resolved by the Python sidecar.
+type ReefUnderwriter struct {
+	// CoverageAmountUSD is the default coverage amount the underwriter
+	// sizes the estimated premium band against. Mosaic + Munich Re
+	// partnership cap (Feb 27 2026) is $15M; 5M default keeps quotes in
+	// SMB-equivalent band.
+	CoverageAmountUSD string `yaml:"coverage_amount_usd,omitempty" json:"coverage_amount_usd,omitempty"`
+	// RubricPath overrides the in-package Munich Re framework markdown
+	// the underwriter agent loads into its system prompt. Empty means
+	// "use the in-package copy at quote/app/rubrics/".
+	RubricPath string `yaml:"rubric_path,omitempty" json:"rubric_path,omitempty"`
 }
 
 // ReefPolicyBus configures the gRPC policy bus client (A-7).

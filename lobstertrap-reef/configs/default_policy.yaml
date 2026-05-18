@@ -60,6 +60,20 @@ reef:
       initial: 0.5
       max: 30
 
+  # A-9 Gemini surfaces. Model identifiers are env-driven (D-017 — Reef
+  # NEVER hardcodes model names). Pro drives the red-team + underwriter;
+  # Flash drives the blue-team observer. Resolution order at runtime:
+  # env var → policy default below.
+  gemini:
+    pro_model: "${GEMINI_PRO_MODEL:-gemini-2.0-pro-exp}"
+    flash_model: "${GEMINI_FLASH_MODEL:-gemini-2.0-flash-exp}"
+
+  # A-9/A-10 Reef Quote (Underwriter Layer). Munich-Re-grounded scorer.
+  # rubric_path can override the in-package copy of the framework markdown.
+  underwriter:
+    coverage_amount_usd: "${REEF_UNDERWRITER_COVERAGE_AMOUNT_USD:-5000000}"
+    rubric_path: "${REEF_UNDERWRITER_RUBRIC:-./quote/app/rubrics/munich_re_framework.md}"
+
 ingress_rules:
   - name: block_prompt_injection
     description: "Detected prompt injection attempt"

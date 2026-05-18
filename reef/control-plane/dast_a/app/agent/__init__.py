@@ -1,4 +1,4 @@
-"""PPO trainer + checkpoint I/O + interactive run loop."""
+"""PPO trainer + checkpoint I/O + interactive run loop + Gemini surfaces."""
 
 from app.agent.checkpoint import (
     CheckpointStore,
@@ -16,6 +16,35 @@ from app.agent.run import (
     EpisodeResult,
     RunSummary,
 )
+from app.agent.gemini_red import (
+    GeminiRedTeam,
+    GeminiRedTeamError,
+    MissingGeminiAPIKey as RedMissingGeminiAPIKey,
+    MissingGeminiProModel,
+    GeminiCallFailed as RedGeminiCallFailed,
+    BrowserCallFailed,
+    SessionResult,
+    RedTeamRound,
+    BrowserDriver,
+    BrowserResponse,
+    GeminiProClient,
+    PlaywrightBrowserDriver,
+    GoogleGenAIProClient,
+)
+from app.agent.gemini_blue import (
+    GeminiBlueTeam,
+    GeminiBlueTeamError,
+    MissingGeminiAPIKey as BlueMissingGeminiAPIKey,
+    MissingGeminiFlashModel,
+    GeminiCallFailed as BlueGeminiCallFailed,
+    TraceEvent,
+    PolicyDraft as BluePolicyDraft,
+    GeminiFlashClient,
+    GoogleGenAIFlashLiveClient,
+    trace_from_episode,
+    trace_from_red_round,
+    trace_source_from_list,
+)
 
 __all__ = [
     "CheckpointStore",
@@ -28,4 +57,31 @@ __all__ = [
     "EpisodeRunConfig",
     "EpisodeResult",
     "RunSummary",
+    # Gemini red-team
+    "GeminiRedTeam",
+    "GeminiRedTeamError",
+    "RedMissingGeminiAPIKey",
+    "MissingGeminiProModel",
+    "RedGeminiCallFailed",
+    "BrowserCallFailed",
+    "SessionResult",
+    "RedTeamRound",
+    "BrowserDriver",
+    "BrowserResponse",
+    "GeminiProClient",
+    "PlaywrightBrowserDriver",
+    "GoogleGenAIProClient",
+    # Gemini blue-team
+    "GeminiBlueTeam",
+    "GeminiBlueTeamError",
+    "BlueMissingGeminiAPIKey",
+    "MissingGeminiFlashModel",
+    "BlueGeminiCallFailed",
+    "TraceEvent",
+    "BluePolicyDraft",
+    "GeminiFlashClient",
+    "GoogleGenAIFlashLiveClient",
+    "trace_from_episode",
+    "trace_from_red_round",
+    "trace_source_from_list",
 ]

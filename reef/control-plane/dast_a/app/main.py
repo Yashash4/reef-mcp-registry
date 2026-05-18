@@ -9,7 +9,7 @@ from pathlib import Path
 from fastapi import FastAPI
 
 from app.agent.checkpoint import CheckpointStore
-from app.api import health, packs, review_queue, run
+from app.api import gemini, health, packs, review_queue, run
 from app.audit import AuditLogger
 from app.packs import PackCatalog, seed_packs
 from app.review import DraftStore, HumanReviewWebhook
@@ -90,6 +90,7 @@ def create_app() -> FastAPI:
     app.include_router(packs.router)
     app.include_router(run.router)
     app.include_router(review_queue.router)
+    app.include_router(gemini.router)
     return app
 
 
