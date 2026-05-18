@@ -19,5 +19,7 @@ data/
 keys/
 .DS_Store
 Thumbs.db
-README.md
+# NOTE: README.md is NOT excluded — pyproject.toml's `readme = "README.md"`
+# means setuptools needs it during `pip install -e .`, and the Dockerfile
+# copies it explicitly. Excluding it here breaks the build.
 # Keep samples/ — committed sample-ria.pdf is mounted by compose

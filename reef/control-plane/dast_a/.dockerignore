@@ -18,6 +18,8 @@ Dockerfile
 data/
 .DS_Store
 Thumbs.db
-README.md
+# NOTE: README.md is NOT excluded — pyproject.toml's `readme = "README.md"`
+# means setuptools needs it during `pip install -e .`, and the Dockerfile
+# copies it explicitly. Excluding it here breaks the build.
 # Keep checkpoints/ — committed dast_a_baseline.zip (168KB) is needed at runtime
 # Keep app/ + tests/ — needed for runtime
