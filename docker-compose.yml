@@ -36,9 +36,42 @@ services:
     networks:
       - reef
 
+  policy-bus:
+    build:
+      context: ./reef/control-plane/policy_bus
+      dockerfile: Dockerfile
+    image: reef/policy-bus:dev
+    container_name: reef-policy-bus
+    environment:
+      - REEF_POLICY_BUS_DATA_DIR=/data
+      - REEF_POLICY_BUS_AUDIT_FILE=/data/audit.jsonl
+      - REEF_POLICY_BUS_PUBLISHER_KEYS_DIR=/keys/publishers
+      - REEF_POLICY_BUS_GRPC_PORT=50051
+      - REEF_POLICY_BUS_ADMIN_PORT=50052
+      # Operators MUST set REEF_POLICY_BUS_ADMIN_TOKEN in their compose .env
+      # file. When unset, the bus generates a random token on first boot and
+      # logs the fingerprint (see policy_bus/data/admin_token.txt).
+      - REEF_POLICY_BUS_ADMIN_TOKEN=${REEF_POLICY_BUS_ADMIN_TOKEN:-}
+    ports:
+      - "50051:50051"
+      - "50052:50052"
+    volumes:
+      - policy-bus-data:/data
+      - policy-bus-keys:/keys
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:50052/healthz').status==200 else 1)\""]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+    networks:
+      - reef
+
 volumes:
   atlas-data:
   atlas-keys:
+  policy-bus-data:
+  policy-bus-keys:
 
 networks:
   reef:

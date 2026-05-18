@@ -1,0 +1,146 @@
+// Reef Policy Bus — TerraFabric-shaped gRPC service for distributing signed
+// Lobster Trap policy bundles to fleet nodes.
+//
+// Hierarchy (matches Veea TerraFabric):
+//
+//   fleet (e.g. "prod-fleet")
+//     └── region (e.g. "us-east")
+//           └── site (e.g. "store-042")
+//                 └── node (e.g. "node-7")
+//
+// Subscribe is a long-lived server-streaming RPC: a node opens it once and
+// the bus pushes any bundle whose scope matches the node identity. Scopes
+// narrow as fleet → region → site → node — an empty scope_* field is a
+// wildcard at that level.
+//
+// Signature contract: ed25519 over SHA-256(bundle_yaml), matching the
+// `pkg/policysync/cosign.go` (A-6) verifier semantics. The publisher's
+// key_id MUST appear in the bus's publisher allowlist before the bundle is
+// accepted via Publish; nodes additionally verify the detached signature
+// locally before applying.
+//
+// Fail-closed contract: an Ack with status "verify_failed" tells the bus
+// the node detected tampering. The bus records this in its audit log so
+// operators can investigate. The node keeps its previous policy active.
+
+syntax = "proto3";
+
+package reef.policy_bus.v1;
+
+option go_package = "github.com/Yashash4/reef-mcp-registry/lobstertrap-reef/pkg/policysync/proto;policybuspb";
+
+// PolicyBus is the gRPC service the control plane exposes to fleet nodes.
+service PolicyBus {
+  // Subscribe is the long-lived server-streaming entrypoint. A node opens
+  // it once at startup; the bus pushes any matching bundle (newer than the
+  // node's current_policy_version) plus periodic heartbeats. On stream
+  // drop, the node reconnects with exponential backoff.
+  rpc Subscribe(SubscribeRequest) returns (stream SignedBundle);
+
+  // Ack is unary. After the node applies (or rejects) a bundle, it acks
+  // with the outcome so the bus can record propagation status + drift.
+  rpc Ack(AckRequest) returns (AckResponse);
+
+  // Publish is unary. Admins push a new signed bundle. The bus verifies
+  // the publisher allowlist + signature before broadcasting to subscribers.
+  // Authentication is via the admin_token field (pre-shared secret in v1;
+  // Phase 2 hardens with mTLS + signed JWT).
+  rpc Publish(PublishRequest) returns (PublishResponse);
+
+  // Healthz is unary. Lightweight check for docker-compose healthcheck +
+  // dashboard liveness probes.
+  rpc Healthz(HealthzRequest) returns (HealthzResponse);
+}
+
+// NodeIdentity uniquely places a node in the TerraFabric hierarchy. The
+// optional svid_subject lets the bus cross-check against the A-6 SVID
+// verifier in audit logs.
+message NodeIdentity {
+  string fleet_id = 1;
+  string region_id = 2;
+  string site_id = 3;
+  string node_id = 4;
+  string svid_subject = 5;
+}
+
+message SubscribeRequest {
+  NodeIdentity node = 1;
+  // current_policy_version is the version the node already applied. The
+  // server only sends bundles with version > current. Empty string means
+  // "send any active bundle".
+  string current_policy_version = 2;
+}
+
+// SignedBundle is the unit of policy distribution. bundle_yaml is the
+// canonical YAML the Lobster Trap policy loader consumes. signature is
+// ed25519 over SHA-256(bundle_yaml), accepting either raw 64 bytes or
+// base64 (the cosign verifier handles both shapes — see
+// pkg/policysync/cosign.go decodeSignature).
+message SignedBundle {
+  string bundle_id = 1;
+  string version = 2;
+
+  // Scope is the TerraFabric hierarchy filter. Empty fields are wildcards.
+  // E.g. scope_fleet_id="prod-fleet" + empty region/site = "all prod-fleet
+  // nodes regardless of region/site".
+  string scope_fleet_id = 3;
+  string scope_region_id = 4;
+  string scope_site_id = 5;
+  string scope_node_id = 6;
+
+  bytes bundle_yaml = 7;
+  bytes signature = 8;
+  string signer_key_id = 9;
+  int64 published_at_unix = 10;
+  // expires_at_unix is optional; 0 means never expires.
+  int64 expires_at_unix = 11;
+
+  // is_heartbeat distinguishes server keep-alive frames from actual policy
+  // pushes. Heartbeats carry no bundle_yaml or signature.
+  bool is_heartbeat = 12;
+}
+
+message AckRequest {
+  NodeIdentity node = 1;
+  string bundle_id = 2;
+  string applied_version = 3;
+
+  // ack_status ∈ {"applied", "verify_failed", "policy_parse_failed",
+  // "kept_old_active", "scope_mismatch"}.
+  string ack_status = 4;
+  string detail = 5;
+}
+
+message AckResponse {
+  // audit_id correlates with the bus's audit log entry — operators grep
+  // for this when investigating propagation.
+  string audit_id = 1;
+}
+
+message PublishRequest {
+  SignedBundle bundle = 1;
+  // admin_token is the pre-shared secret loaded from
+  // REEF_POLICY_BUS_ADMIN_TOKEN. Mismatch → reject + audit.
+  string admin_token = 2;
+}
+
+message PublishResponse {
+  string bundle_id = 1;
+  // fleet_recipient_count is the number of nodes currently subscribed
+  // whose scope matches this bundle.
+  int64 fleet_recipient_count = 2;
+  // audit_id correlates with the publish audit entry.
+  string audit_id = 3;
+}
+
+message HealthzRequest {}
+
+message HealthzResponse {
+  // status ∈ {"ok", "degraded"}. Both 200; degraded signals a non-fatal
+  // subsystem failure (e.g. allowlist file unreadable but cache still hot).
+  string status = 1;
+  // active_subscribers is the count of long-lived Subscribe streams.
+  int64 active_subscribers = 2;
+  // active_bundles is the count of currently-cached bundles.
+  int64 active_bundles = 3;
+}

@@ -45,6 +45,21 @@ reef:
   # ed25519 public key the hot-reload watcher verifies new bundles against.
   policy_signer_pub_key: "./keys/policy-signer.pub"
 
+  # A-7 gRPC policy bus client. Opens a long-lived Subscribe stream against
+  # the bus and hot-reloads on each verified bundle. The Go client lives in
+  # pkg/policysync/grpc_client.go; cmd/serve.go wires it when --enable-reef
+  # is on and the policy_signer_pub_key above resolves.
+  policy_bus:
+    grpc_url: "localhost:50051"
+    # Pre-shared secret the operator publishes bundles with. Empty here —
+    # set via REEF_POLICY_BUS_ADMIN_TOKEN env so it's never committed to
+    # YAML.
+    admin_token: ""
+    # Reconnect backoff bounds on stream drop. Exponential between these.
+    retry_backoff_seconds:
+      initial: 0.5
+      max: 30
+
 ingress_rules:
   - name: block_prompt_injection
     description: "Detected prompt injection attempt"

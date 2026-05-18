@@ -153,6 +153,28 @@ type ReefPolicy struct {
 	// cosign-style verification (the watcher logs a warning and applies the
 	// new policy anyway — operators MUST set this in production).
 	PolicySignerPubKey string `yaml:"policy_signer_pub_key,omitempty" json:"policy_signer_pub_key,omitempty"`
+
+	// PolicyBus configures the A-7 gRPC client that subscribes to the
+	// TerraFabric-shaped Reef Policy Bus and hot-reloads on each verified
+	// bundle. cmd/serve.go wires this when --enable-reef is on.
+	PolicyBus ReefPolicyBus `yaml:"policy_bus,omitempty" json:"policy_bus,omitempty"`
+}
+
+// ReefPolicyBus configures the gRPC policy bus client (A-7).
+type ReefPolicyBus struct {
+	// GRPCURL is the bus's gRPC host:port. Default "localhost:50051".
+	GRPCURL string `yaml:"grpc_url,omitempty" json:"grpc_url,omitempty"`
+	// AdminToken is the pre-shared secret for Publish calls; usually
+	// supplied via REEF_POLICY_BUS_ADMIN_TOKEN env (never committed to YAML).
+	AdminToken string `yaml:"admin_token,omitempty" json:"admin_token,omitempty"`
+	// RetryBackoffSeconds bounds the exponential reconnect schedule.
+	RetryBackoffSeconds ReefBackoff `yaml:"retry_backoff_seconds,omitempty" json:"retry_backoff_seconds,omitempty"`
+}
+
+// ReefBackoff is the (initial, max) exponential reconnect backoff bound.
+type ReefBackoff struct {
+	Initial float64 `yaml:"initial,omitempty" json:"initial,omitempty"`
+	Max     float64 `yaml:"max,omitempty" json:"max,omitempty"`
 }
 
 // ReefRateLimit configures per-identity token-bucket throttling.

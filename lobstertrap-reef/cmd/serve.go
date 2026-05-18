@@ -304,6 +304,71 @@ func runServe(cmd *cobra.Command, args []string) error {
 		pipe = pipe.WithOTelExporter(exp)
 		logger.Info().Str("exporter", string(exp.Kind())).Msg("OpenTelemetry exporter enabled")
 
+		// Reef A-7: gRPC policy bus client. Opens a long-lived Subscribe
+		// stream against the bus and hot-reloads the active policy on each
+		// verified bundle. Fails closed: a tampered bundle leaves the
+		// previous policy active (the client acks "verify_failed" so the
+		// bus dashboard surfaces the rejection).
+		busURL := os.Getenv("REEF_POLICY_BUS_GRPC_URL")
+		if busURL == "" {
+			busURL = pol.Reef.PolicyBus.GRPCURL
+		}
+		if busURL == "" {
+			busURL = "localhost:50051"
+		}
+		if pol.Reef.PolicySignerPubKey != "" || os.Getenv("REEF_POLICY_BUS_DISABLE") == "" {
+			signerPubKey := pol.Reef.PolicySignerPubKey
+			if signerPubKey == "" {
+				signerPubKey = os.Getenv("REEF_POLICY_SIGNER_PUB_KEY")
+			}
+			if signerPubKey == "" {
+				logger.Warn().Msg("policy bus client disabled — REEF_POLICY_SIGNER_PUB_KEY unset and reef.policy_signer_pub_key empty")
+			} else if _, statErr := os.Stat(signerPubKey); statErr != nil {
+				logger.Warn().Err(statErr).Str("path", signerPubKey).Msg("policy bus client disabled — signer public key not readable")
+			} else {
+				busVerifier, vErr := policysync.NewCosignVerifier(signerPubKey)
+				if vErr != nil {
+					logger.Warn().Err(vErr).Msg("policy bus client disabled — verifier construction failed")
+				} else {
+					identity := policysync.NodeIdentity{
+						FleetID:     envOrDefault("REEF_FLEET_ID", "demo-fleet"),
+						RegionID:    envOrDefault("REEF_REGION_ID", "demo-region"),
+						SiteID:      envOrDefault("REEF_SITE_ID", "demo-site"),
+						NodeID:      envOrDefault("REEF_NODE_ID", "node-1"),
+						SVIDSubject: os.Getenv("REEF_SVID_SUBJECT"),
+					}
+					policyApplier := newPolicyApplier(pol, &reefLoggerAdapter{logger: logger.With().Str("subsystem", "policy-apply").Logger()})
+					initialBackoff := time.Duration(pol.Reef.PolicyBus.RetryBackoffSeconds.Initial * float64(time.Second))
+					maxBackoff := time.Duration(pol.Reef.PolicyBus.RetryBackoffSeconds.Max * float64(time.Second))
+					busClient, cErr := policysync.NewClient(policysync.Config{
+						Endpoint:       busURL,
+						Identity:       identity,
+						Verifier:       busVerifier,
+						Applier:        policyApplier,
+						Logger:         &reefLoggerAdapter{logger: logger.With().Str("subsystem", "policysync").Logger()},
+						InitialBackoff: initialBackoff,
+						MaxBackoff:     maxBackoff,
+					})
+					if cErr != nil {
+						logger.Warn().Err(cErr).Msg("policy bus client construction failed — proceeding without hot reload")
+					} else {
+						go func() {
+							if rerr := busClient.Run(context.Background()); rerr != nil && rerr != context.Canceled {
+								logger.Warn().Err(rerr).Msg("policy bus client exited")
+							}
+						}()
+						logger.Info().
+							Str("bus_url", busURL).
+							Str("fleet", identity.FleetID).
+							Str("region", identity.RegionID).
+							Str("site", identity.SiteID).
+							Str("node", identity.NodeID).
+							Msg("policy bus client subscribed")
+					}
+				}
+			}
+		}
+
 		logger.Info().
 			Str("quarantine_dir", store.Dir()).
 			Str("redirect_fallback", redirectFallback).

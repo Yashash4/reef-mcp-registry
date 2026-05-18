@@ -1,0 +1,12 @@
+data/*.json
+data/*.jsonl
+data/admin_token.txt
+keys/
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.venv/
+build/
+dist/
