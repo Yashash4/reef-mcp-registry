@@ -52,7 +52,7 @@ export function DemoModeBanner() {
             Demo Mode
           </span>
           <span className="text-text-2">
-            Live preview with realistic mock data.{" "}
+            Live preview with realistic preview data.{" "}
             <span className="text-text-3">
               Full source, signed RIA, and reproducible benchmarks on{" "}
               <a

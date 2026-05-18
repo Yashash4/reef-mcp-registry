@@ -2,7 +2,8 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { fetchFleet } from "@/app/lib/api/policy-bus";
-import { REEF_FLEET_ID } from "@/app/lib/env";
+import { REEF_DEMO_MODE, REEF_FLEET_ID } from "@/app/lib/env";
+import { MOCK_FLEET_SNAPSHOT } from "@/app/lib/mocks/fixtures";
 import type { FleetSnapshot, NodeRecord } from "@/app/lib/types";
 
 export interface UseFleetResult {
@@ -17,13 +18,17 @@ export interface UseFleetResult {
 
 /** Poll policy-bus /fleet every 5 s. Graceful degradation on transport
  *  failure — surfaces `isError` so the caller can render an "offline" badge
- *  instead of crashing the dashboard. */
+ *  instead of crashing the dashboard.
+ *
+ *  In DEMO MODE we seed `initialData` from the canonical fixture so the
+ *  panel hydrates fully-populated on first render — no "loading" flash. */
 export function useFleet(fleetId: string = REEF_FLEET_ID): UseFleetResult {
   const q = useQuery({
     queryKey: ["fleet", fleetId],
     queryFn: () => fetchFleet(fleetId),
     refetchInterval: 5_000,
     staleTime: 2_000,
+    initialData: REEF_DEMO_MODE ? MOCK_FLEET_SNAPSHOT : undefined,
   });
 
   const nodes = q.data?.nodes ?? [];

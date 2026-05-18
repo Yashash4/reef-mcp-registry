@@ -106,6 +106,16 @@ function computeAction(e: {
   event?: string;
   decision?: string;
 }): AuditAction {
+  // Decision-first mapping for the 4 canonical Lobster Trap actions —
+  // wins over kind so a `decision: "MODIFY"` row always renders as MODIFY
+  // regardless of which `kind` the producer chose.
+  const dec = (e.decision ?? "").toUpperCase();
+  if (dec === "MODIFY") return { label: "MODIFY", color: "amber" };
+  if (dec === "QUARANTINE") return { label: "QUARANTINE", color: "violet" };
+  if (dec === "HUMAN_REVIEW")
+    return { label: "HUMAN_REVIEW", color: "amber" };
+  if (dec === "REDIRECT") return { label: "REDIRECT", color: "cyan" };
+
   // Map kind+event/decision into a Stage-UI-friendly action label
   if (e.kind === "publish") {
     if (e.event === "accepted") {
@@ -115,13 +125,16 @@ function computeAction(e: {
       return { label: "BUNDLE_REJECTED", color: "red" };
     }
   }
-  if (e.kind === "verify") {
+  if (e.kind === "verify" || e.kind === "mcp_verify") {
     if (e.decision === "deny") return { label: "BIND_DENIED", color: "red" };
     if (e.decision === "review")
       return { label: "BIND_REVIEW", color: "amber" };
     if (e.decision === "allow")
-      return { label: "BIND_ALLOWED", color: "emerald" };
+      return { label: "ALLOW", color: "emerald" };
   }
+  if (e.kind === "modify") return { label: "MODIFY", color: "amber" };
+  if (e.kind === "quarantine")
+    return { label: "QUARANTINE", color: "violet" };
   if (e.kind === "publisher") {
     return { label: "PUBLISHER_ADDED", color: "cyan" };
   }

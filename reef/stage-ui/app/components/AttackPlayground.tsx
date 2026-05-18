@@ -20,6 +20,13 @@ interface AttackResult {
   exfil_detected?: boolean;
 }
 
+interface DemoStage {
+  /** Which sub-beats have been revealed in the canonical replay. */
+  imageStripped: boolean;
+  auditRow: boolean;
+  canary: boolean;
+}
+
 /**
  * Interactive "pop a window and try to attack" panel.
  *
@@ -44,6 +51,11 @@ export function AttackPlayground({ className }: AttackPlaygroundProps) {
   const [pending, setPending] = useState(false);
   const [result, setResult] = useState<AttackResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [demoStage, setDemoStage] = useState<DemoStage>({
+    imageStripped: false,
+    auditRow: false,
+    canary: false,
+  });
 
   // No backend wired in (Vercel production with NEXT_PUBLIC_REEF_DEMO_MODE=true)
   const hasBackend = Boolean(REEF_VICTIM_URL);
@@ -52,21 +64,35 @@ export function AttackPlayground({ className }: AttackPlaygroundProps) {
     setPending(true);
     setResult(null);
     setError(null);
+    setDemoStage({ imageStripped: false, auditRow: false, canary: false });
 
-    // No backend → return the canonical MODIFY-blocked response so the
-    // panel still tells the right story on the deployed Vercel build.
+    // No backend → replay the canonical 3-stage MODIFY-blocked sequence
+    // so the deployed Vercel build still tells the right story:
+    //   1. 800 ms — button transitions to "Running…", email body redacts
+    //   2. 1.2 s — audit row materializes (MODIFY · EchoLeak-26.05 · 142ms)
+    //   3. 1.5 s — green check: "Canary token preserved"
     if (!hasBackend) {
-      // Tiny artificial delay so the button transition still feels live.
-      await new Promise((r) => setTimeout(r, 600));
-      setResult({
-        blocked: true,
-        reason:
-          "Reef MODIFY action stripped the markdown image to attacker.example.com (egress.markdown_image rule, bundle v3.2.1).",
-        echoed_summary:
-          "Summary: contract notes received. (markdown image removed by Reef egress proxy)",
-        exfil_detected: false,
-      });
-      setPending(false);
+      setTimeout(
+        () =>
+          setDemoStage((s) => ({ ...s, imageStripped: true })),
+        800
+      );
+      setTimeout(
+        () => setDemoStage((s) => ({ ...s, auditRow: true })),
+        1200
+      );
+      setTimeout(() => {
+        setDemoStage((s) => ({ ...s, canary: true }));
+        setResult({
+          blocked: true,
+          reason:
+            "Reef MODIFY action stripped the markdown image to attacker.example.com (egress.markdown_image rule, bundle v4.0.0).",
+          echoed_summary:
+            "Summary: contract notes received. (markdown image removed by Reef egress proxy)",
+          exfil_detected: false,
+        });
+        setPending(false);
+      }, 1500);
       return;
     }
 
@@ -97,6 +123,9 @@ export function AttackPlayground({ className }: AttackPlaygroundProps) {
         echoed_summary: data.summary,
         exfil_detected: data.exfil_detected,
       });
+      // Live path also lights up the same reveal stages so the visible
+      // outcome is consistent across demo + live modes.
+      setDemoStage({ imageStripped: !!data.blocked, auditRow: !!data.blocked, canary: true });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Victim app unreachable");
     } finally {
@@ -154,7 +183,7 @@ export function AttackPlayground({ className }: AttackPlaygroundProps) {
             <div className="flex items-center gap-2">
               <Button onClick={runAttack} disabled={pending}>
                 <Send className="h-4 w-4" />
-                {pending ? "Sending…" : "Attempt attack"}
+                {pending ? "Running…" : "Attempt attack"}
               </Button>
               {result && (
                 <Badge variant={result.blocked ? "emerald" : result.exfil_detected ? "red" : "amber"}>
@@ -162,7 +191,28 @@ export function AttackPlayground({ className }: AttackPlaygroundProps) {
                 </Badge>
               )}
             </div>
-            {result && (
+            {demoStage.imageStripped && (
+              <motion.div
+                initial={{ opacity: 0, y: 4 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.25 }}
+                className="rounded-md border border-red/30 bg-red-soft px-3 py-2 mono text-[11px] text-red"
+              >
+                [image stripped by Lobster Trap MODIFY]
+              </motion.div>
+            )}
+            {demoStage.auditRow && (
+              <motion.div
+                initial={{ opacity: 0, y: 4 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.25 }}
+                className="rounded-md border border-amber/30 bg-amber-soft px-3 py-2 mono text-[11px] text-amber"
+              >
+                2026-05-18 20:49:17Z · MODIFY · EchoLeak-26.05 · markdown image
+                stripped · 142ms
+              </motion.div>
+            )}
+            {result && demoStage.canary && (
               <motion.div
                 initial={{ opacity: 0, y: 4 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -175,7 +225,9 @@ export function AttackPlayground({ className }: AttackPlaygroundProps) {
                     <ShieldX className="h-4 w-4 text-red" />
                   )}
                   <span className="text-xs uppercase tracking-widest text-text-3">
-                    result
+                    {result.blocked
+                      ? "Canary token preserved · agent received sanitized payload"
+                      : "result"}
                   </span>
                 </div>
                 <div className="text-sm text-text">{result.reason}</div>

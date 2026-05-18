@@ -127,7 +127,7 @@ export function MCPRegistryBeat({
                 size="sm"
                 onClick={runBeat}
               >
-                {step === "idle" ? "Run beat" : "Replay"}
+                {step === "idle" ? "Run MCP Block Demo →" : "Replay"}
               </Button>
             </div>
 
@@ -335,8 +335,9 @@ function BindDeniedPunch({ step }: { step: Step }) {
             transition={{ duration: 0.2 }}
             className="flex items-center justify-center min-h-[260px]"
           >
-            <div className="text-text-3 mono text-xs uppercase tracking-widest">
-              press "Run beat" — calls live Atlas /verify
+            <div className="text-text-3 mono text-xs uppercase tracking-widest text-center max-w-md">
+              Replays the canonical April 2026 Anthropic MCP RCE — Atlas
+              denies the bind in under 12 ms.
             </div>
           </motion.div>
         )}

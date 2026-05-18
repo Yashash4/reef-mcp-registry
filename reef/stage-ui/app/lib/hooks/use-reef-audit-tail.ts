@@ -2,6 +2,8 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { fetchAuditTail } from "@/app/lib/api/policy-bus";
+import { REEF_DEMO_MODE } from "@/app/lib/env";
+import { MOCK_AUDIT_EVENTS } from "@/app/lib/mocks/fixtures";
 import type { AuditEvent } from "@/app/lib/types";
 
 export interface UseReefAuditTailResult {
@@ -14,7 +16,8 @@ export interface UseReefAuditTailResult {
 /** Poll the policy-bus /audit/tail every 3 s. Requires the admin token —
  *  if the token is missing the hook fails fast with a clear error message
  *  so the caller can render an inline "set NEXT_PUBLIC_REEF_POLICY_BUS_ADMIN_TOKEN
- *  in .env.local" hint. */
+ *  in .env.local" hint. In DEMO MODE the hook seeds the canonical 5-row
+ *  fixture as `initialData` so the panel renders fully on first paint. */
 export function useReefAuditTail(n: number = 20): UseReefAuditTailResult {
   const q = useQuery({
     queryKey: ["audit-tail", n],
@@ -22,6 +25,7 @@ export function useReefAuditTail(n: number = 20): UseReefAuditTailResult {
     refetchInterval: 3_000,
     staleTime: 1_500,
     retry: 0,
+    initialData: REEF_DEMO_MODE ? MOCK_AUDIT_EVENTS.slice(0, n) : undefined,
   });
 
   return {

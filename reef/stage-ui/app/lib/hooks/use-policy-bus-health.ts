@@ -5,6 +5,11 @@ import {
   fetchBundles,
   fetchPolicyBusHealth,
 } from "@/app/lib/api/policy-bus";
+import { REEF_DEMO_MODE } from "@/app/lib/env";
+import {
+  MOCK_BUNDLES,
+  MOCK_POLICY_BUS_HEALTH,
+} from "@/app/lib/mocks/fixtures";
 import type { BundleListItem, PolicyBusHealthz } from "@/app/lib/types";
 
 export interface UsePolicyBusHealthResult {
@@ -22,12 +27,14 @@ export function usePolicyBusHealth(): UsePolicyBusHealthResult {
     queryFn: fetchPolicyBusHealth,
     refetchInterval: 5_000,
     staleTime: 2_000,
+    initialData: REEF_DEMO_MODE ? MOCK_POLICY_BUS_HEALTH : undefined,
   });
   const bundlesQ = useQuery({
     queryKey: ["policy-bus-bundles"],
     queryFn: fetchBundles,
     refetchInterval: 10_000,
     staleTime: 5_000,
+    initialData: REEF_DEMO_MODE ? MOCK_BUNDLES : undefined,
   });
 
   const bundles = bundlesQ.data ?? [];

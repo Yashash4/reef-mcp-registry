@@ -12,6 +12,8 @@ import {
   STATIC_SAMPLE_RIA_SUMMARY,
   fetchRIASampleVerify,
 } from "@/app/lib/api/quote";
+import { REEF_DEMO_MODE } from "@/app/lib/env";
+import { MOCK_RIA_VERIFY } from "@/app/lib/mocks/fixtures";
 
 interface RIAPanelProps {
   className?: string;
@@ -28,6 +30,7 @@ export function RIAPanel({ className }: RIAPanelProps) {
     refetchInterval: 60_000,
     staleTime: 30_000,
     retry: 0,
+    initialData: REEF_DEMO_MODE ? MOCK_RIA_VERIFY : undefined,
   });
 
   // Falls back to STATIC_SAMPLE_RIA_SUMMARY when the Quote service is offline

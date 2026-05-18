@@ -2,6 +2,8 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { fetchAtlasHealth } from "@/app/lib/api/atlas";
+import { REEF_DEMO_MODE } from "@/app/lib/env";
+import { MOCK_ATLAS_HEALTH } from "@/app/lib/mocks/fixtures";
 import type { AtlasHealthz } from "@/app/lib/types";
 
 export interface UseAtlasHealthResult {
@@ -21,6 +23,7 @@ export function useAtlasHealth(): UseAtlasHealthResult {
     queryFn: fetchAtlasHealth,
     refetchInterval: 30_000,
     staleTime: 10_000,
+    initialData: REEF_DEMO_MODE ? MOCK_ATLAS_HEALTH : undefined,
   });
 
   return {

@@ -2,13 +2,15 @@
  * Realistic-shape mock data used when the backend services are unreachable
  * (or when `NEXT_PUBLIC_REEF_DEMO_MODE=true`). Every shape mirrors the
  * pydantic models documented in `app/lib/types.ts`. Numbers + IDs are
- * deliberately chosen to match the canonical demo narrative:
+ * deliberately chosen to match the canonical demo narrative shown in the
+ * submission video + RIA PDF:
  *
  *   - 4 seed attack packs from `reef/control-plane/dast_a/app/packs/seed_packs.py`
  *     (MCP-RCE-26.04, EchoLeak-26.05, MarkdownExfil-26.05, ToolChain-Drift-26.04)
- *   - 49 nodes for the fleet stadium-wave (7 regions × 7 sites)
- *   - Atlas registry counts (verified / quarantined / poisoned) that match
- *     the demo's "12 verified, 3 quarantined, 1 poisoned" cold-open beat.
+ *   - 49 nodes for the fleet stadium-wave (7 regions × 7 sites), 47 applied + 2 kept-old
+ *   - Atlas registry counts: 47 verified, 1 quarantined, 1 poisoned (matches video)
+ *   - 4 total signed bundles, current = bundle-v4 · ed25519 · a7c9…f3
+ *   - 5 canonical audit rows replayed verbatim in Recent Decisions
  *   - Sample RIA summary mirrors `STATIC_SAMPLE_RIA_SUMMARY` in `quote.ts`
  *     and matches the verbatim disclaimer language from `docs/03-TASKS.md`.
  *
@@ -43,13 +45,20 @@ function makeNode(
   regionIdx: number,
   siteIdx: number,
   nodeIdx: number,
-  opts: { online?: boolean; ackOffsetSec?: number } = {}
+  opts: { ackStatus?: NodeRecord["last_ack_status"]; ackOffsetSec?: number } = {}
 ): NodeRecord {
   const region_id = `region-${String.fromCharCode(97 + regionIdx)}`;
   const site_id = `site-${siteIdx + 1}`;
   const node_id = `node-${regionIdx}-${siteIdx}-${nodeIdx}`;
-  const online = opts.online ?? true;
+  const ackStatus = opts.ackStatus ?? "applied";
+  const online = ackStatus !== "unknown";
   const last_ack_unix = online ? T0_UNIX - (opts.ackOffsetSec ?? 0) : 0;
+  const detail =
+    ackStatus === "applied"
+      ? "policy applied successfully"
+      : ackStatus === "kept_old_active"
+      ? "kept previous bundle active (fail-safe)"
+      : "node has not been seen for >120s";
   return {
     identity: {
       fleet_id: "prod-fleet",
@@ -58,12 +67,10 @@ function makeNode(
       node_id,
       svid_subject: `spiffe://reef.local/fleet/prod-fleet/${region_id}/${site_id}/${node_id}`,
     },
-    last_applied_version: "v3.2.1",
-    last_applied_bundle_id: "bundle-2026-05-18-r3",
-    last_ack_status: online ? "applied" : "unknown",
-    last_ack_detail: online
-      ? "policy applied successfully"
-      : "node has not been seen for >120s",
+    last_applied_version: "v4.0.0",
+    last_applied_bundle_id: "bundle-v4-2026-05-18",
+    last_ack_status: ackStatus,
+    last_ack_detail: detail,
     last_ack_unix,
     last_subscribe_unix: online ? last_ack_unix - 30 : 0,
     online,
@@ -71,15 +78,23 @@ function makeNode(
 }
 
 // 7 regions × 7 sites × 1 node = 49 dots for the FleetGrid stadium-wave.
+// Canonical demo: 47 of 49 applied · 2 kept-old (fail-safe). Matches the
+// "Nodes applied current bundle: 47 / 49" stat in the video + RIA PDF.
 function buildMockNodes(): NodeRecord[] {
   const nodes: NodeRecord[] = [];
   for (let r = 0; r < 7; r++) {
     for (let s = 0; s < 7; s++) {
-      // Make the wave look natural — earlier-region nodes acked first.
+      // Earlier-region nodes acked first so the stadium wave looks natural.
       const ackOffset = r * 8 + s * 3;
-      // ~6 % offline rate (sprinkle a few amber dots).
-      const online = !(r === 2 && s === 5) && !(r === 5 && s === 1);
-      nodes.push(makeNode(r, s, 0, { online, ackOffsetSec: ackOffset }));
+      // Exactly 2 nodes on the fail-safe path (kept old active) so the
+      // emerald-applied count lands at 47.
+      const isKeptOld = (r === 2 && s === 5) || (r === 5 && s === 1);
+      nodes.push(
+        makeNode(r, s, 0, {
+          ackStatus: isKeptOld ? "kept_old_active" : "applied",
+          ackOffsetSec: ackOffset,
+        })
+      );
     }
   }
   return nodes;
@@ -95,14 +110,31 @@ export const MOCK_FLEET_SNAPSHOT: FleetSnapshot = {
 
 export const MOCK_POLICY_BUS_HEALTH: PolicyBusHealthz = {
   status: "ok",
-  active_subscribers: 47, // 49 nodes - 2 offline
-  active_bundles: 1,
+  active_subscribers: 49,
+  active_bundles: 4,
   fleet_node_count: 49,
 };
 
+// Canonical 4 signed bundles. Current = bundle-v4 with fingerprint a7c9…f3.
+// Order: v4 (most recent) → v3 → v2 → v1.
 export const MOCK_BUNDLES: BundleListItem[] = [
   {
-    bundle_id: "bundle-2026-05-18-r3",
+    bundle_id: "bundle-v4-2026-05-18",
+    version: "v4.0.0",
+    scope: {
+      fleet_id: "prod-fleet",
+      region_id: "*",
+      site_id: "*",
+      node_id: "*",
+    },
+    signer_key_id: "reef-policy-signer-2026",
+    signer_fingerprint: "SHA256:a7c9b4d2e1f80c5a6b7e8d9f0a1b2c3d4e5f6a7b8c9d0e1f3",
+    published_at_unix: T0_UNIX - 1800, // 30 min ago
+    bundle_sha256_hex:
+      "a7c9b4d2e1f80c5a6b7e8d9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9f3",
+  },
+  {
+    bundle_id: "bundle-v3-2026-05-17",
     version: "v3.2.1",
     scope: {
       fleet_id: "prod-fleet",
@@ -112,13 +144,13 @@ export const MOCK_BUNDLES: BundleListItem[] = [
     },
     signer_key_id: "reef-policy-signer-2026",
     signer_fingerprint: "SHA256:a3f9b7c2e1d8d4f6a9b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5",
-    published_at_unix: T0_UNIX - 1800, // 30 min ago
+    published_at_unix: T0_UNIX - 86_400,
     bundle_sha256_hex:
       "c4d18a7e2f63b91a8e7d6c5b4a39281706f5e4d3c2b1a09f8e7d6c5b4a392817",
   },
   {
-    bundle_id: "bundle-2026-05-18-r2",
-    version: "v3.2.0",
+    bundle_id: "bundle-v2-2026-05-15",
+    version: "v2.1.0",
     scope: {
       fleet_id: "prod-fleet",
       region_id: "*",
@@ -127,112 +159,109 @@ export const MOCK_BUNDLES: BundleListItem[] = [
     },
     signer_key_id: "reef-policy-signer-2026",
     signer_fingerprint: "SHA256:a3f9b7c2e1d8d4f6a9b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5",
-    published_at_unix: T0_UNIX - 7200,
+    published_at_unix: T0_UNIX - 86_400 * 3,
     bundle_sha256_hex:
       "b3c07a6d1e52a809d7c6b5a4938270615f4d3c2b1a09f8e7d6c5b4a3928170615",
   },
+  {
+    bundle_id: "bundle-v1-2026-05-10",
+    version: "v1.0.0",
+    scope: {
+      fleet_id: "prod-fleet",
+      region_id: "*",
+      site_id: "*",
+      node_id: "*",
+    },
+    signer_key_id: "reef-policy-signer-2026",
+    signer_fingerprint: "SHA256:a3f9b7c2e1d8d4f6a9b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5",
+    published_at_unix: T0_UNIX - 86_400 * 8,
+    bundle_sha256_hex:
+      "9e8f7a6b5c4d3e2f1a09b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0c9d8e7f",
+  },
 ];
+
+// Canonical 5-row Recent Decisions feed — replayed verbatim in DEMO MODE
+// so the deployed Vercel build tells the same story as the video + RIA PDF.
+// Timestamps map to (T0=2026-05-18 12:00 UTC + 8h 48m, 8h 46m, ...) so the
+// rendered row reads "2026-05-18 20:48:21Z · BIND_DENIED · MCP-RCE-26.04 ...".
+// `reason` is formatted "pack_id · short_detail · latency_ms" so the row
+// surfaces all four pieces of the canonical format inside RecentDecisionsFeed.
+const T_BASE = T0_UNIX + 8 * 3600; // 2026-05-18 20:00 UTC
 
 export const MOCK_AUDIT_EVENTS: AuditEvent[] = [
   {
-    audit_id: "evt-26051812-001",
-    ts_unix: T0_UNIX - 12,
-    kind: "mcp_verify",
+    audit_id: "evt-26051820-001",
+    ts_unix: T_BASE + 48 * 60 + 21, // 20:48:21Z
+    kind: "verify",
     event: "verify",
     decision: "deny",
-    reason: "publisher_unknown",
-    bundle_id: "bundle-2026-05-18-r3",
-    version: "v3.2.1",
-    signer_key_id: "reef-policy-signer-2026",
-    mcp_name: "com.attacker-example/evil-server",
+    reason: "MCP-RCE-26.04 · com.attacker-example/evil · 11ms",
+    mcp_name: "com.attacker-example/evil",
     mcp_version: "0.5.0",
+    pack_id: "MCP-RCE-26.04",
+    latency_ms: 11,
   },
   {
-    audit_id: "evt-26051812-002",
-    ts_unix: T0_UNIX - 26,
-    kind: "policy_eval",
+    audit_id: "evt-26051820-002",
+    ts_unix: T_BASE + 46 * 60 + 3, // 20:46:03Z
+    kind: "modify",
     event: "egress.markdown_image",
     decision: "MODIFY",
-    reason: "external_image_url_to_untrusted_domain",
-    bundle_id: "bundle-2026-05-18-r3",
-    version: "v3.2.1",
-    signer_key_id: "reef-policy-signer-2026",
+    reason: "EchoLeak-26.05 · markdown image stripped · 142ms",
+    bundle_id: "bundle-v4-2026-05-18",
+    version: "v4.0.0",
+    pack_id: "EchoLeak-26.05",
+    latency_ms: 142,
   },
   {
-    audit_id: "evt-26051812-003",
-    ts_unix: T0_UNIX - 41,
-    kind: "policy_eval",
+    audit_id: "evt-26051820-003",
+    ts_unix: T_BASE + 42 * 60 + 55, // 20:42:55Z
+    kind: "quarantine",
     event: "tool_call",
     decision: "QUARANTINE",
-    reason: "tool_capability_drift",
-    bundle_id: "bundle-2026-05-18-r3",
-    version: "v3.2.1",
-    signer_key_id: "reef-policy-signer-2026",
+    reason: "ToolChain-Drift-26.04 · asi_category_ewma 0.47 · 78ms",
+    bundle_id: "bundle-v4-2026-05-18",
+    version: "v4.0.0",
+    pack_id: "ToolChain-Drift-26.04",
+    latency_ms: 78,
   },
   {
-    audit_id: "evt-26051812-004",
-    ts_unix: T0_UNIX - 55,
-    kind: "bundle_publish",
-    event: "publish",
-    decision: "applied",
-    reason: "fleet-wide rollout",
-    bundle_id: "bundle-2026-05-18-r3",
-    version: "v3.2.1",
-    signer_key_id: "reef-policy-signer-2026",
-    fleet_recipient_count: 47,
-  },
-  {
-    audit_id: "evt-26051812-005",
-    ts_unix: T0_UNIX - 72,
-    kind: "mcp_verify",
+    audit_id: "evt-26051820-004",
+    ts_unix: T_BASE + 39 * 60 + 11, // 20:39:11Z
+    kind: "verify",
     event: "verify",
     decision: "allow",
-    reason: "signature_valid_known_publisher",
-    mcp_name: "com.veea.lobster-trap-reef",
-    mcp_version: "1.0.0",
+    reason: "io.github.modelctxp · signature verified · 8ms",
+    mcp_name: "io.github.modelctxp",
+    mcp_version: "1.2.0",
+    latency_ms: 8,
   },
   {
-    audit_id: "evt-26051812-006",
-    ts_unix: T0_UNIX - 95,
-    kind: "policy_eval",
-    event: "egress.exfil_attempt",
-    decision: "QUARANTINE",
-    reason: "echoleak_pattern_match",
-    bundle_id: "bundle-2026-05-18-r3",
-    version: "v3.2.1",
-  },
-  {
-    audit_id: "evt-26051812-007",
-    ts_unix: T0_UNIX - 118,
-    kind: "policy_eval",
-    event: "tool_call",
-    decision: "HUMAN_REVIEW",
-    reason: "novel_attack_pack_DAST_A_proposal",
-    bundle_id: "bundle-2026-05-18-r3",
-    version: "v3.2.1",
-  },
-  {
-    audit_id: "evt-26051812-008",
-    ts_unix: T0_UNIX - 140,
-    kind: "mcp_verify",
+    audit_id: "evt-26051820-005",
+    ts_unix: T_BASE + 35 * 60 + 44, // 20:35:44Z
+    kind: "verify",
     event: "verify",
-    decision: "allow",
-    reason: "signature_valid_known_publisher",
-    mcp_name: "com.anthropic.filesystem",
-    mcp_version: "0.6.2",
+    decision: "deny",
+    reason: "MCP-RCE-26.04 · unsigned origin · 9ms",
+    mcp_name: "com.unknown/origin",
+    mcp_version: "0.1.0",
+    pack_id: "MCP-RCE-26.04",
+    latency_ms: 9,
   },
 ];
 
 // ─── Atlas (MCP signature registry) ───────────────────────────────────
 
+// Canonical Atlas registry counters — 47 verified, 1 quarantined, 1 poisoned.
+// Matches the headline FleetStatusPanel stats in the video + RIA PDF.
 export const MOCK_ATLAS_HEALTH: AtlasHealthz = {
   status: "ok",
   registry_entries: {
-    verified: 12,
-    quarantined: 3,
+    verified: 47,
+    quarantined: 1,
     poisoned: 1,
   },
-  total_entries: 16,
+  total_entries: 49,
   publishers: 5,
 };
 

@@ -2,6 +2,8 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { fetchDastAPacks } from "@/app/lib/api/dast-a";
+import { REEF_DEMO_MODE } from "@/app/lib/env";
+import { MOCK_DAST_A_PACKS } from "@/app/lib/mocks/fixtures";
 import type { AttackPackList } from "@/app/lib/types";
 
 export interface UseDastAPacksResult {
@@ -18,6 +20,7 @@ export function useDastAPacks(): UseDastAPacksResult {
     queryFn: () => fetchDastAPacks(1, 50),
     refetchInterval: 10_000,
     staleTime: 5_000,
+    initialData: REEF_DEMO_MODE ? MOCK_DAST_A_PACKS : undefined,
   });
 
   return {
