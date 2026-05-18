@@ -239,11 +239,12 @@ def draw_top_panel(img: Image.Image) -> None:
         fill=TEXT_3,
     )
 
-    # MCP server icon on the right side
-    icon_x = px + pw - 360
-    icon_y = py + 70
-    icon_w = 280
+    # MCP server icon on the right side. Wide enough to fit the longest
+    # row (com.attacker-example/evil  v0.5.0 = 33 chars at F_MONO_SM).
+    icon_w = 450
     icon_h = 180
+    icon_x = px + pw - 80 - icon_w  # keep 80px gap from parent panel right edge
+    icon_y = py + 70
     rounded_rect(
         draw,
         (icon_x, icon_y, icon_x + icon_w, icon_y + icon_h),
@@ -252,7 +253,10 @@ def draw_top_panel(img: Image.Image) -> None:
         outline=BORDER,
         width=2,
     )
-    # "Server" stack glyph — package name on the left, version right-aligned.
+    # "Server" stack glyph — single-string rows, with padding so the version
+    # numbers line up roughly in a column. Package names are 23-25 chars;
+    # padded to 25 + 2 separator spaces so all three versions start at the
+    # same monospace column.
     server_rows = [
         ("com.anthropic/server-fs", "v1.2.0"),
         ("io.github.modelctxp/...", "v0.6.3"),
@@ -271,20 +275,12 @@ def draw_top_panel(img: Image.Image) -> None:
         led_color = RED if i == 2 else CYAN
         draw.ellipse((icon_x + 48, sy + 8, icon_x + 58, sy + 18), fill=led_color)
         text_fill = TEXT_2 if i < 2 else RED
-        # Package name — left-aligned just right of the LED
+        # Single-string row: package name left-padded to 25 chars + 2 spaces + version.
+        # In a monospace font, this gives a clean version column at the same x.
+        row_text = f"{pkg_name:<25}  {version}"
         draw.text(
             (icon_x + 70, sy + 1),
-            pkg_name,
-            font=F_MONO_SM,
-            fill=text_fill,
-        )
-        # Version — right-aligned so all three versions line up in a column
-        ver_bbox = F_MONO_SM.getbbox(version)
-        ver_w = ver_bbox[2] - ver_bbox[0]
-        ver_x = icon_x + icon_w - 40 - ver_w
-        draw.text(
-            (ver_x, sy + 1),
-            version,
+            row_text,
             font=F_MONO_SM,
             fill=text_fill,
         )
