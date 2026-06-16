@@ -1,18 +1,31 @@
 <p align="center">
   <a href="https://www.veea.com/events/techex-2026-hackathon">
-    <img src="https://img.shields.io/badge/%F0%9F%8F%86%20WINNER-Veea%20Award%20%C2%B7%20TechEx%202026-FFD700?style=for-the-badge&labelColor=0a0a0a" alt="Winner: Veea Award · TechEx 2026" />
+    <img src="https://img.shields.io/badge/%F0%9F%8F%86%20WINNER-Track%201%20%C2%B7%20TechEx%202026-FFD700?style=for-the-badge&labelColor=0a0a0a" alt="Winner: Track 1 · TechEx 2026" />
   </a>
 </p>
 
-<h2 align="center">🏆&nbsp; Reef won the Veea Award at the TechEx 2026 Hackathon &nbsp;🏆</h2>
+<h2 align="center">🏆&nbsp; Reef won Track 1 at the TechEx 2026 Hackathon &nbsp;🏆</h2>
 
 <p align="center">
-  <em>Recognised for the signed MCP supply chain, four runtime actions contributed back to Lobster Trap upstream, and the Reef Insurance Artifact a Munich Re style underwriter can actually price.</em>
+  <em>Selected from 140+ teams in Track 1: Agent Security &amp; AI Governance.<br/>
+  Sponsored by Veea. Prizes: NVIDIA DGX Spark + Veea DevKit.</em>
   <br/><br/>
-  <a href="https://www.veea.com/events/techex-2026-hackathon"><b>Official hackathon page on veea.com</b></a>
+  <a href="https://www.veea.com/events/techex-2026-hackathon"><b>Official Veea hackathon recap</b></a>
   &nbsp;·&nbsp;
   <a href="https://www.linkedin.com/posts/veea_github-yashash4reef-mcp-registry-activity-7462640053106757632-07Pb"><b>Veea's LinkedIn announcement</b></a>
 </p>
+
+<blockquote>
+<p align="center">
+<em>"Agent governance isn't a feature of the agentic economy. It's the precondition for one. We sponsored Track 1 at TechEx to find the people building that precondition. We found Tripod."</em>
+</p>
+<p align="center">
+<em>"Tripod shipped the four missing Lobster Trap actions — MODIFY, REDIRECT, QUARANTINE, HUMAN_REVIEW — back to us as an upstream-mergeable PR. Table-driven tests, no TODOs, no swallowed errors. That's not a hackathon submission. That's a contribution to the open-source product the rest of the industry is going to depend on."</em>
+</p>
+<p align="center">
+<sub>Veea, announcing Reef as Track 1 winner · <a href="https://www.linkedin.com/posts/veea_github-yashash4reef-mcp-registry-activity-7462640053106757632-07Pb">LinkedIn, June 2026</a></sub>
+</p>
+</blockquote>
 
 <hr/>
 
