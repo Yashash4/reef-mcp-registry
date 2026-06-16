@@ -12,8 +12,6 @@
   <a href="https://www.veea.com/events/techex-2026-hackathon"><b>Official hackathon page on veea.com</b></a>
   &nbsp;·&nbsp;
   <a href="https://www.linkedin.com/posts/veea_github-yashash4reef-mcp-registry-activity-7462640053106757632-07Pb"><b>Veea's LinkedIn announcement</b></a>
-  <br/>
-  <sub>Gemini Award · not yet announced. This README will update when results are public.</sub>
 </p>
 
 <hr/>
