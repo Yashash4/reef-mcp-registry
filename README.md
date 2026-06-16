@@ -15,16 +15,15 @@
   <a href="https://www.linkedin.com/posts/veea_github-yashash4reef-mcp-registry-activity-7462640053106757632-07Pb"><b>Veea's LinkedIn announcement</b></a>
 </p>
 
+<h3 align="center">What the Track 1 sponsor said about Reef</h3>
+
+<p align="center">
+In their official recap, Veea framed agent governance as the <em>precondition</em> for the agentic economy and credited Reef with three things that stood out across 140+ submissions: an open-source Sigstore-style signature layer for MCP that the ecosystem doesn't ship today, a 100% block rate against four CVE-mapped attack packs with raw episode logs in the repo, and an ed25519-signed insurance artifact that closes the AI-exclusion gap every standard cyber and E&amp;O policy carries in 2026. The part Veea called decisive: Reef shipped four missing Lobster Trap runtime actions (MODIFY, REDIRECT, QUARANTINE, HUMAN_REVIEW) back upstream as a mergeable PR with table-driven tests, no TODOs, no swallowed errors.
+</p>
+
 <blockquote>
-<p align="center">
-<em>"Agent governance isn't a feature of the agentic economy. It's the precondition for one. We sponsored Track 1 at TechEx to find the people building that precondition. We found Tripod."</em>
-</p>
-<p align="center">
-<em>"Tripod shipped the four missing Lobster Trap actions — MODIFY, REDIRECT, QUARANTINE, HUMAN_REVIEW — back to us as an upstream-mergeable PR. Table-driven tests, no TODOs, no swallowed errors. That's not a hackathon submission. That's a contribution to the open-source product the rest of the industry is going to depend on."</em>
-</p>
-<p align="center">
-<sub>Veea, announcing Reef as Track 1 winner · <a href="https://www.linkedin.com/posts/veea_github-yashash4reef-mcp-registry-activity-7462640053106757632-07Pb">LinkedIn, June 2026</a></sub>
-</p>
+<p align="center"><b>"That's not a hackathon submission. That's a contribution to the open-source product the rest of the industry is going to depend on."</b></p>
+<p align="center"><sub>From Veea's Track 1 recap (<a href="https://www.veea.com/events/techex-2026-hackathon">veea.com</a> · <a href="https://www.linkedin.com/posts/veea_github-yashash4reef-mcp-registry-activity-7462640053106757632-07Pb">LinkedIn</a>)</sub></p>
 </blockquote>
 
 <hr/>
