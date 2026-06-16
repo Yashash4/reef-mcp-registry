@@ -6,12 +6,25 @@
 
 **The first AI deployment that's also the first insurable AI deployment.**
 
+[![Winner: Veea Award · TechEx 2026](https://img.shields.io/badge/Winner-Veea%20Award%20%C2%B7%20TechEx%202026-gold.svg)](https://www.veea.com/events/techex-2026-hackathon)
 [![License: MIT](https://img.shields.io/badge/License-MIT-emerald.svg)](./LICENSE)
 [![TechEx 2026](https://img.shields.io/badge/TechEx-2026-cyan.svg)](https://lablab.ai/ai-hackathons/techex-intelligent-enterprise-solutions-hackathon)
 [![Status: v0.1.0 live](https://img.shields.io/badge/Status-v0.1.0%20%C2%B7%20live-emerald.svg)](https://reef-mcp-registry.vercel.app)
 [![Built on Lobster Trap](https://img.shields.io/badge/Built%20on-Veea%20Lobster%20Trap-violet.svg)](https://github.com/veeainc/lobstertrap)
 
 </div>
+
+---
+
+## Veea Award · TechEx 2026 Hackathon Winner
+
+Reef won the **Veea Award** at the TechEx 2026 hackathon, announced by Veea on the official hackathon page and on LinkedIn. The award recognised the signed MCP supply chain layer that closed the April 2026 Anthropic MCP RCE at the handshake, the four runtime actions contributed back to Lobster Trap upstream, and the Reef Insurance Artifact that lets a Munich Re style underwriter actually price an AI agent fleet.
+
+| | |
+|---|---|
+| **Official announcement** | [veea.com / TechEx 2026 hackathon page](https://www.veea.com/events/techex-2026-hackathon) |
+| **LinkedIn** | [Veea's post crediting `Yashash4/reef-mcp-registry`](https://www.linkedin.com/posts/veea_github-yashash4reef-mcp-registry-activity-7462640053106757632-07Pb) |
+| **Gemini Award** | not yet announced; this README will update when results are public. |
 
 **When AI agents shop for tools online, they get scammed.** Reef is the signed catalog of safe tools, plus the audit your insurance company needs to cover an agent fleet. It blocked the April 2026 Anthropic MCP RCE at the handshake, and it outputs the artifact your underwriter can actually price.
 
