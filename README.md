@@ -15,7 +15,7 @@
   <a href="https://www.linkedin.com/posts/veea_github-yashash4reef-mcp-registry-activity-7462640053106757632-07Pb"><b>Veea's LinkedIn announcement</b></a>
 </p>
 
-<h3 align="center">What the Track 1 sponsor said about Reef</h3>
+<h3 align="center">What Veea, the Track 1 sponsor, said about Reef</h3>
 
 <p align="center">
 In their official recap, Veea framed agent governance as the <em>precondition</em> for the agentic economy and credited Reef with three things that stood out across 140+ submissions: an open-source Sigstore-style signature layer for MCP that the ecosystem doesn't ship today, a 100% block rate against four CVE-mapped attack packs with raw episode logs in the repo, and an ed25519-signed insurance artifact that closes the AI-exclusion gap every standard cyber and E&amp;O policy carries in 2026. The part Veea called decisive: Reef shipped four missing Lobster Trap runtime actions (MODIFY, REDIRECT, QUARANTINE, HUMAN_REVIEW) back upstream as a mergeable PR with table-driven tests, no TODOs, no swallowed errors.
